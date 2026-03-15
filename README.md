@@ -30,42 +30,39 @@ data-ml/
 ├─ tests/               # 단위 테스트 및 통합 테스트 코드
 └─ README.md
 🌿 브랜치 전략 (Branching Strategy)
-안정적인 파이프라인 운영과 도메인(Crawler, Training) 간의 독립적인 개발을 위해 간소화된 Git Flow 전략을 사용합니다.
+안정적인 파이프라인 운영과 도메인(Crawler, Training) 간의 독립적인 개발을 위해 간소화된 Git Flow 전략을 사용.
 
 📌 브랜치 종류
 
-main: 실제 서비스나 프로덕션 환경에 배포되는 최종 안정화 브랜치입니다. (직접 커밋 불가, PR을 통해서만 병합)
+main: 실제 서비스나 프로덕션 환경에 배포되는 최종 안정화 브랜치. (직접 커밋 불가, PR을 통해서만 병합)
 
-dev: 다음 릴리즈를 위해 각 feature 브랜치들의 기능이 모이는 통합 개발 브랜치입니다.
+dev: 다음 릴리즈를 위해 각 feature 브랜치들의 기능이 모이는 통합 개발 브랜치.
 
-feature/crawler-*: 데이터 수집 파이프라인 기능 개발 및 수정 시 사용하는 브랜치입니다.
+crawler: 데이터 수집 파이프라인 기능 개발 및 수정 시 사용하는 브랜치.
 
-예시: feature/crawler-naver-news, feature/crawler-pipeline-fix
+(커밋메시지 예시: feature/crawler-naver-news, feature/crawler-pipeline-fix)
 
-feature/training-*: 모델 구조 변경, 전처리, 학습 로직 개선 등 ML 관련 작업 시 사용하는 브랜치입니다.
+training: 모델 구조 변경, 전처리, 학습 로직 개선 등 ML 관련 작업 시 사용하는 브랜치
 
-예시: feature/training-xgboost, feature/training-loss-tuning
+(커밋메시지 예시: feature/training-xgboost, feature/training-loss-tuning)
 
-fix/*: dev나 main 브랜치에서 발생한 버그를 긴급하게 수정할 때 사용합니다.
+fix: dev나 main 브랜치에서 발생한 버그를 긴급하게 수정할 때 사용.
 
-예시: fix/crawler-parsing-error
+(커밋메시지 예시: fix/crawler-parsing-error)
 
 🔄 작업 워크플로우 (Workflow)
 
-기능 개발이 필요하면 최신 dev 브랜치에서 새로운 feature/* 브랜치를 생성합니다.
+기능 개발이 필요하면 최신 dev 브랜치에서 새로운 브랜치를 생성. (dev 브랜치는 최신화 유지)
 
 Bash
 git checkout dev
 git pull origin dev
 git checkout -b feature/crawler-add-scraper
-작업 완료 후, 로컬에서 테스트를 마친 뒤 Github(또는 GitLab)에 Push 합니다.
+작업 완료 후, 로컬에서 테스트를 마친 뒤 Github(또는 GitLab)에 Push.
 
-dev 브랜치로 Pull Request (PR) 를 생성하고, 코드 리뷰 후 병합(Merge) 합니다.
-
-양쪽 도메인의 연동 테스트가 dev에서 완벽히 통과되면 main 브랜치로 Merge 하여 릴리즈합니다.
+dev 브랜치로 Pull Request (PR) 를 생성하고, 팀원간의 코드 리뷰 후 머지. PR 생성후에는 작업상황 카톡으로 공유
 
 📝 커밋 규칙 (Commit Convention)
-일관된 히스토리 관리를 위해 커밋 메시지 작성 시 아래의 규칙을 엄격하게 따릅니다.
 
 📌 커밋 메시지 구조
 
@@ -76,13 +73,13 @@ Plaintext
 🏷️ 커밋 타입 (Type)
 
 태그	설명
-feat	새로운 기능 추가 (예: 모델 추가, 크롤러 API 연동)
-fix	버그 수정 (예: 파싱 에러 수정, loss 함수 오류 수정)
-docs	문서 추가 및 수정 (예: README.md, 주석 업데이트)
-style	코드 포맷팅, 세미콜론 누락, 오타 수정 (로직 변경 없음)
-refactor	코드 리팩토링 (기능 변화 없이 구조 개선)
-test	테스트 코드 추가 및 수정
-chore	빌드 설정, 패키지 매니저, 환경 설정 수정 (예: requirements.txt)
+feat: 새로운 기능 추가 (예: 모델 추가, 크롤러 API 연동)
+fix:	버그 수정 (예: 파싱 에러 수정, loss 함수 오류 수정)
+docs: 문서 추가 및 수정 (예: README.md, 주석 업데이트)
+style: 코드 포맷팅, 세미콜론 누락, 오타 수정 (로직 변경 없음)
+refactor: 코드 리팩토링 (기능 변화 없이 구조 개선)
+test: 테스트 코드 추가 및 수정
+chore: 빌드 설정, 패키지 매니저, 환경 설정 수정 (예: requirements.txt)
 💡 커밋 메시지 작성 예시
 
 Crawler 도메인 작업 시:
@@ -104,6 +101,6 @@ fix(training): DataLoader 메모리 누수 버그 수정
 Plaintext
 chore(shared): PyTorch 및 Pydantic 라이브러리 버전 업데이트
 ⚠️ 협업 시 주의사항
-데이터 계약 (shared/schema.py) 준수: crawler 브랜치 담당자와 training 브랜치 담당자는 주고받는 데이터의 구조가 변경될 경우, 반드시 사전에 협의하여 shared/schema.py를 업데이트해야 합니다.
+데이터 계약 (shared/schema.py) 준수: crawler 브랜치 담당자와 training 브랜치 담당자는 주고받는 데이터의 구조가 변경될 경우, 반드시 사전에 협의하여 shared/schema.py를 업데이트.
 
-의존성 분리: 가급적 crawler/ 폴더 내의 코드가 training/ 폴더 내의 코드를 직접 참조하지 않도록 유의합니다. (필요한 경우 shared/ 활용)
+의존성 분리: 가급적 crawler/ 폴더 내의 코드가 training/ 폴더 내의 코드를 직접 참조하지 않도록 유의. (필요한 경우 shared/ 활용)
