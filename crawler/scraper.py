@@ -1,5 +1,6 @@
 import time
 import re
+from pathlib import Path
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -8,6 +9,7 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.federalreserve.gov"
 CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+OUTPUT_CSV = Path(__file__).resolve().parents[1] / "data" / "fed_fomc_links.csv"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
@@ -304,4 +306,6 @@ df = pd.DataFrame(results).drop_duplicates()
 print(df.head(20))
 
 # CSV 파일로 저장
-df.to_csv("fed_fomc_links.csv", index=False, encoding="utf-8-sig")
+OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+print(f"Saved: {OUTPUT_CSV}")
