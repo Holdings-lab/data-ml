@@ -6,13 +6,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from xgboost import XGBClassifier, plot_importance
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    confusion_matrix,
-    roc_auc_score
-)
+from xgboost import XGBRegressor, plot_importance
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
 
 # =========================================================
@@ -84,7 +79,7 @@ df["vol_10"] = daily_ret.rolling(10).std()
 df["vol_20"] = daily_ret.rolling(20).std()
 
 # =========================================================
-# 4. 장기 추세 feature
+# 4. 장기 추세 feature (평평해지는 문제 해결 핵심)
 # =========================================================
 for w in [5, 10, 20, 60, 120, 200]:
     ma = price.rolling(w).mean()
@@ -146,6 +141,7 @@ df["tlt_ret_5"] = tlt.pct_change(5)
 df["tlt_ret_20"] = tlt.pct_change(20)
 df["tlt_to_ma_60"] = tlt / tlt.rolling(60).mean() - 1.0
 
+# 상대강도
 df["qqq_spy_ratio"] = price / spy
 df["qqq_spy_ratio_20"] = df["qqq_spy_ratio"] / df["qqq_spy_ratio"].rolling(20).mean() - 1.0
 
@@ -153,12 +149,12 @@ df["qqq_tlt_ratio"] = price / tlt
 df["qqq_tlt_ratio_20"] = df["qqq_tlt_ratio"] / df["qqq_tlt_ratio"].rolling(20).mean() - 1.0
 
 # =========================================================
-# 8. 분류 타깃: 5일 뒤 상승/하락
+# 8. 타깃: 5일 뒤 로그수익률
 # =========================================================
 horizon = 5
+df["target_logret_5d"] = np.log(price.shift(-horizon) / price)
 df["target_future_price"] = price.shift(-horizon)
 df["target_date"] = df["Date"].shift(-horizon)
-df["target_up_5d"] = (df["target_future_price"] > price).astype(int)
 
 # =========================================================
 # 9. feature 선택
@@ -189,10 +185,7 @@ feature_cols = [
 df = df.dropna().copy()
 
 X = df[feature_cols]
-y = df["target_up_5d"]
-
-print("Target distribution:")
-print(y.value_counts(normalize=True))
+y = df["target_logret_5d"]
 
 # =========================================================
 # 10. train / test 분리
@@ -210,7 +203,7 @@ test_target_date = pd.to_datetime(df.iloc[split:]["target_date"].values)
 test_current_date = pd.to_datetime(df.iloc[split:]["Date"].values)
 
 # =========================================================
-# 11. walk-forward CV로 설정 선택
+# 11. walk-forward CV로 n_estimators 선택
 # =========================================================
 param_grid = [
     {"n_estimators": 300, "max_depth": 3, "learning_rate": 0.03},
@@ -222,7 +215,7 @@ param_grid = [
 tscv = TimeSeriesSplit(n_splits=4)
 
 best_cfg = None
-best_score = -np.inf
+best_score = np.inf
 
 for cfg in param_grid:
     fold_scores = []
@@ -231,11 +224,8 @@ for cfg in param_grid:
         X_tr, X_va = X_train.iloc[tr_idx], X_train.iloc[va_idx]
         y_tr, y_va = y_train.iloc[tr_idx], y_train.iloc[va_idx]
 
-        scale_pos_weight = (y_tr == 0).sum() / max((y_tr == 1).sum(), 1)
-
-        model = XGBClassifier(
-            objective="binary:logistic",
-            eval_metric="logloss",
+        model = XGBRegressor(
+            objective="reg:squarederror",
             tree_method="hist",
             random_state=42,
             subsample=0.85,
@@ -244,32 +234,28 @@ for cfg in param_grid:
             gamma=0.2,
             reg_alpha=0.1,
             reg_lambda=1.5,
-            scale_pos_weight=scale_pos_weight,
             **cfg
         )
 
         model.fit(X_tr, y_tr)
         pred_va = model.predict(X_va)
-        acc = accuracy_score(y_va, pred_va)
-        fold_scores.append(acc)
+        rmse = np.sqrt(mean_squared_error(y_va, pred_va))
+        fold_scores.append(rmse)
 
-    avg_acc = np.mean(fold_scores)
+    avg_rmse = np.mean(fold_scores)
 
-    if avg_acc > best_score:
-        best_score = avg_acc
+    if avg_rmse < best_score:
+        best_score = avg_rmse
         best_cfg = cfg
 
 print("Best CV config:", best_cfg)
-print("Best CV Accuracy:", round(best_score, 6))
+print("Best CV RMSE(logret):", round(best_score, 6))
 
 # =========================================================
 # 12. 최종 학습
 # =========================================================
-scale_pos_weight = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
-
-model = XGBClassifier(
-    objective="binary:logistic",
-    eval_metric="logloss",
+model = XGBRegressor(
+    objective="reg:squarederror",
     tree_method="hist",
     random_state=42,
     subsample=0.85,
@@ -278,7 +264,6 @@ model = XGBClassifier(
     gamma=0.2,
     reg_alpha=0.1,
     reg_lambda=1.5,
-    scale_pos_weight=scale_pos_weight,
     **best_cfg
 )
 
@@ -287,50 +272,50 @@ model.fit(X_train, y_train)
 # =========================================================
 # 13. 예측
 # =========================================================
-y_pred = model.predict(X_test)
-y_prob = model.predict_proba(X_test)[:, 1]
+pred_logret = model.predict(X_test)
 
-# 0.5 기준 상승/하락
-pred_dir = y_pred
-actual_dir = y_test.values
-
-# 참고용: 확률을 가격 방향으로 해석
-pred_future_price_direction = np.where(y_prob >= 0.5, "UP", "DOWN")
-actual_future_price_direction = np.where(actual_dir == 1, "UP", "DOWN")
+# 로그수익률 -> 미래 가격 복원
+pred_future_price = test_current_price * np.exp(pred_logret)
 
 # =========================================================
 # 14. 평가
 # =========================================================
-acc = accuracy_score(y_test, y_pred)
-auc = roc_auc_score(y_test, y_prob)
+mae = mean_absolute_error(test_future_price, pred_future_price)
+rmse = np.sqrt(mean_squared_error(test_future_price, pred_future_price))
+r2 = r2_score(test_future_price, pred_future_price)
 
-print("\n===== Classification Metrics =====")
-print("Accuracy:", round(acc, 4))
-print("ROC-AUC:", round(auc, 4))
-print("\nClassification Report:")
-print(classification_report(y_test, y_pred, digits=4))
-print("Confusion Matrix:")
-print(confusion_matrix(y_test, y_pred))
+actual_dir = test_future_price > test_current_price
+pred_dir = pred_future_price > test_current_price
+direction_acc = (actual_dir == pred_dir).mean()
 
-# baseline: 전부 상승 예측
-baseline_pred = np.ones_like(y_test.values)
-baseline_acc = accuracy_score(y_test, baseline_pred)
+mape = np.mean(np.abs((test_future_price - pred_future_price) / test_future_price)) * 100
 
-print("\n===== Baseline (always UP) =====")
-print("Baseline Accuracy:", round(baseline_acc, 4))
+print("\n===== Regression Metrics =====")
+print("MAE:", round(mae, 4))
+print("RMSE:", round(rmse, 4))
+print("R2:", round(r2, 4))
+print("MAPE(%):", round(mape, 4))
+print("Direction Accuracy:", round(direction_acc, 4))
+
+# baseline: 그냥 현재가격 = 5일 뒤 가격이라고 가정
+baseline_pred_price = test_current_price.copy()
+baseline_rmse = np.sqrt(mean_squared_error(test_future_price, baseline_pred_price))
+baseline_mae = mean_absolute_error(test_future_price, baseline_pred_price)
+baseline_mape = np.mean(np.abs((test_future_price - baseline_pred_price) / test_future_price)) * 100
+
+print("\n===== Baseline (future price = current price) =====")
+print("Baseline MAE:", round(baseline_mae, 4))
+print("Baseline RMSE:", round(baseline_rmse, 4))
+print("Baseline MAPE(%):", round(baseline_mape, 4))
 
 # =========================================================
 # 15. 중요도
 # =========================================================
-score = model.get_booster().get_score(importance_type="gain")
-if len(score) > 0:
-    plt.figure(figsize=(10, 8))
-    plot_importance(model, max_num_features=25, importance_type="gain")
-    plt.title("Feature Importance (QQQ 5-day up/down classification)")
-    plt.tight_layout()
-    plt.show()
-else:
-    print("\nFeature importance를 그릴 split이 없습니다.")
+#plt.figure(figsize=(10, 8))
+#plot_importance(model, max_num_features=25, importance_type="gain")
+#plt.title("Feature Importance (QQQ 5-day log-return regression)")
+#plt.tight_layout()
+#plt.show()
 
 # =========================================================
 # 16. 결과 테이블
@@ -340,47 +325,39 @@ result_df = pd.DataFrame({
     "Target_Date": test_target_date,
     "Current_Price": test_current_price,
     "Actual_Future_Price": test_future_price,
-    "Actual_UpDown": actual_future_price_direction,
-    "Pred_UpDown": pred_future_price_direction,
-    "Prob_Up": y_prob
+    "Pred_Future_Price": pred_future_price,
+    "Pred_LogRet": pred_logret,
 })
 
 print("\nPrediction Sample:")
 print(result_df.head(10))
 
 # =========================================================
-# 17. 그래프 1: 상승 확률
+# 17. 그래프 1: 미래 실제가격 vs 미래 예측가격
 # =========================================================
 plt.figure(figsize=(14, 7))
-plt.plot(result_df["Current_Date"], result_df["Prob_Up"], label="Predicted Probability of Up")
-plt.axhline(0.5, linestyle="--", linewidth=1, label="Threshold 0.5")
-plt.title("QQQ: Predicted Probability of Going Up in 5 Days")
-plt.xlabel("Prediction Date")
-plt.ylabel("Probability")
+plt.plot(result_df["Target_Date"], result_df["Actual_Future_Price"], label="Actual Future Price")
+plt.plot(result_df["Target_Date"], result_df["Pred_Future_Price"], label="Predicted Future Price")
+plt.title("QQQ: Actual vs Predicted Future Price (5-day ahead)")
+plt.xlabel("Date")
+plt.ylabel("Price")
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
 # =========================================================
-# 18. 그래프 2: 실제 가격 + 상승확률(보조축)
+# 18. 그래프 2: 마지막 150개만 확대
 # =========================================================
-fig, ax1 = plt.subplots(figsize=(14, 7))
+zoom_df = result_df.tail(150).copy()
 
-ax1.plot(result_df["Target_Date"], result_df["Actual_Future_Price"], label="Actual Future Price")
-ax1.set_xlabel("Date")
-ax1.set_ylabel("Price")
-
-ax2 = ax1.twinx()
-ax2.plot(result_df["Current_Date"], result_df["Prob_Up"], linestyle="--", label="Prob Up")
-ax2.set_ylabel("Probability of Up")
-
-ax1.set_title("QQQ Future Price and Predicted Up Probability")
-ax1.grid(True, alpha=0.3)
-
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
-
+plt.figure(figsize=(14, 7))
+plt.plot(zoom_df["Target_Date"], zoom_df["Actual_Future_Price"], label="Actual Future Price")
+plt.plot(zoom_df["Target_Date"], zoom_df["Pred_Future_Price"], label="Predicted Future Price")
+plt.title("QQQ: Actual vs Predicted Future Price (Zoom)")
+plt.xlabel("Date")
+plt.ylabel("Price")
+plt.legend()
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
