@@ -97,7 +97,6 @@ def parse_listing_item(tag: BeautifulSoup) -> Optional[Dict]:
 
     type_tag = tag.parent.find("a", rel="tag")
     type = clean_text(type_tag.get_text(" ", strip=True)) if type_tag else ""
-    print(f"type : {type}")
 
     # 날짜 추정
     date_match = re.search(
