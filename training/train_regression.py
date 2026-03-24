@@ -13,15 +13,17 @@ from sklearn.model_selection import TimeSeriesSplit
 # =========================================================
 # 1. 데이터 다운로드
 # =========================================================
-tickers = ["QQQ", "SPY", "^VIX", "TLT"]
+tickers = ["QQQ", "SPY", "^VIX", "TLT"] 
+#QQQ: 나스닥 100 지수, SPY: S&P 500 지수, ^VIX: 변동성 지수, TLT: 장기 국채 ETF
 
 raw = yf.download(
     tickers=tickers,
     start="2010-01-01",
     end="2026-01-01",
-    auto_adjust=False,
+    auto_adjust=True, #주가 조정 (배당금, 액면분할 등) 반영된 가격 사용/ if, False면 조정 안된 가격 사용
     progress=False
 )
+#여러 자산의 가격을 하나의 테이블로 다운로드. 멀티인덱스 형태로 (필드, 티커) 구조로 저장됨.
 
 def get_series(data: pd.DataFrame, field: str, ticker: str) -> pd.Series:
     s = data[field][ticker].copy()
@@ -72,11 +74,17 @@ df["ret_3"] = price.pct_change(3)
 df["ret_5"] = price.pct_change(5)
 df["ret_10"] = price.pct_change(10)
 df["ret_20"] = price.pct_change(20)
+#ret = (오늘 가격 - 과거 가격) / 과거 가격. ret_5는 5일 전과 비교한 수익률. 미래 수익률 예측이 목표이므로 과거 수익률을 feature로 사용.
 
 daily_ret = price.pct_change()
+#daily_ret는 일간 수익률. 변동성 계산에 사용됨.
+
 df["vol_5"] = daily_ret.rolling(5).std()
 df["vol_10"] = daily_ret.rolling(10).std()
 df["vol_20"] = daily_ret.rolling(20).std()
+#vol = 수익률의 표준편차로 계산된 변동성. vol_5는 최근 5일간의 일간 수익률의 표준편차. 미래 수익률 예측에 변동성이 중요한 역할을 할 수 있기 때문에 feature로 사용.
+
+#추가 feature 생성: 이동평균과의 비율, 장기 추세, 거래량 변화, 캔들 특징, RSI/MACD/Bollinger, SPY/VIX/TLT 관련 feature 등
 
 # =========================================================
 # 4. 장기 추세 feature (평평해지는 문제 해결 핵심)
@@ -84,9 +92,11 @@ df["vol_20"] = daily_ret.rolling(20).std()
 for w in [5, 10, 20, 60, 120, 200]:
     ma = price.rolling(w).mean()
     df[f"price_to_ma_{w}"] = price / ma - 1.0
+#price_to_ma_20는 현재 가격이 20일 이동평균보다 몇 % 높은지 나타냄. 이동평균과의 비율은 장기 추세를 반영하는 중요한 feature가 될 수 있음.
 
 for w in [20, 60, 120, 200]:
     df[f"slope_{w}"] = np.log(price / price.shift(w)) / w
+#slope_20은 20일 전 가격과 비교한 로그 수익률을 20으로 나눈 값. 장기 추세의 기울기를 나타냄. 평평해지는 문제를 해결하는 데 중요한 역할을 할 수 있음.
 
 # =========================================================
 # 5. 거래량 / 캔들 feature
@@ -108,12 +118,16 @@ avg_gain = gain.rolling(14).mean()
 avg_loss = loss.rolling(14).mean()
 rs = avg_gain / avg_loss
 df["rsi_14"] = 100 - (100 / (1 + rs))
+#rsi_14는 14일 RSI. RSI는 최근 상승폭과 하락폭을 비교하여 과매수/과매도 상태를 나타내는 지표로, 미래 수익률 예측에 유용한 feature가 될 수 있음.
+#과열상태 감지
 
 ema12 = price.ewm(span=12, adjust=False).mean()
 ema26 = price.ewm(span=26, adjust=False).mean()
 df["macd"] = ema12 - ema26
 df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 df["macd_hist"] = df["macd"] - df["macd_signal"]
+#macd는 12일 EMA와 26일 EMA의 차이. macd_signal은 macd의 9일 EMA. macd_hist는 macd와 macd_signal의 차이. MACD는 모멘텀 지표로, 추세의 강도와 방향을 나타내며 미래 수익률 예측에 도움이 될 수 있음.
+# 단기추세 vs 장기추세 비교
 
 bb_mid = price.rolling(20).mean()
 bb_std = price.rolling(20).std()
@@ -122,6 +136,7 @@ bb_lower = bb_mid - 2 * bb_std
 
 df["bb_width"] = (bb_upper - bb_lower) / bb_mid
 df["bb_pos"] = (price - bb_lower) / (bb_upper - bb_lower)
+# 가격의 “정상 범위”
 
 # =========================================================
 # 7. SPY / VIX / TLT feature
@@ -149,10 +164,10 @@ df["qqq_tlt_ratio"] = price / tlt
 df["qqq_tlt_ratio_20"] = df["qqq_tlt_ratio"] / df["qqq_tlt_ratio"].rolling(20).mean() - 1.0
 
 # =========================================================
-# 8. 타깃: 5일 뒤 로그수익률
+# 8. 타깃: 2일 뒤 로그수익률
 # =========================================================
-horizon = 5
-df["target_logret_5d"] = np.log(price.shift(-horizon) / price)
+horizon = 25 #타겟 날짜
+df["target_logret_2d"] = np.log(price.shift(-horizon) / price)
 df["target_future_price"] = price.shift(-horizon)
 df["target_date"] = df["Date"].shift(-horizon)
 
@@ -185,7 +200,7 @@ feature_cols = [
 df = df.dropna().copy()
 
 X = df[feature_cols]
-y = df["target_logret_5d"]
+y = df["target_logret_2d"]
 
 # =========================================================
 # 10. train / test 분리
@@ -206,13 +221,14 @@ test_current_date = pd.to_datetime(df.iloc[split:]["Date"].values)
 # 11. walk-forward CV로 n_estimators 선택
 # =========================================================
 param_grid = [
-    {"n_estimators": 300, "max_depth": 3, "learning_rate": 0.03},
-    {"n_estimators": 500, "max_depth": 3, "learning_rate": 0.03},
-    {"n_estimators": 700, "max_depth": 4, "learning_rate": 0.02},
-    {"n_estimators": 900, "max_depth": 4, "learning_rate": 0.02},
+    {"n_estimators": 300, "max_depth": 3, "learning_rate": 0.01},
+    {"n_estimators": 300, "max_depth": 5, "learning_rate": 0.01},
+    
 ]
+#n_estimators는 트리의 개수, max_depth는 각 트리의 최대 깊이, learning_rate는 각 트리가 예측에 기여하는 정도를 조절하는 하이퍼파라미터. 이들을 조합하여 모델의 복잡도와 학습 속도를 조절할 수 있음. walk-forward CV로 최적의 조합을 찾음.
 
 tscv = TimeSeriesSplit(n_splits=4)
+#TimeSeriesSplit는 시계열 데이터를 순차적으로 분할하여 훈련과 검증을 수행하는 방법. 과거 데이터로 모델을 훈련시키고, 이후의 데이터로 검증하는 방식으로 시계열 데이터의 시간적 특성을 고려한 교차 검증을 가능하게 함.
 
 best_cfg = None
 best_score = np.inf
@@ -237,10 +253,10 @@ for cfg in param_grid:
             **cfg
         )
 
-        model.fit(X_tr, y_tr)
-        pred_va = model.predict(X_va)
-        rmse = np.sqrt(mean_squared_error(y_va, pred_va))
-        fold_scores.append(rmse)
+        model.fit(X_tr, y_tr) #훈련 세트로 모델 학습
+        pred_va = model.predict(X_va) #검증 세트에 대한 예측값 생성
+        rmse = np.sqrt(mean_squared_error(y_va, pred_va)) #검증 세트의 실제값과 예측값 간의 RMSE 계산
+        fold_scores.append(rmse) 
 
     avg_rmse = np.mean(fold_scores)
 
@@ -280,13 +296,13 @@ pred_future_price = test_current_price * np.exp(pred_logret)
 # =========================================================
 # 14. 평가
 # =========================================================
-mae = mean_absolute_error(test_future_price, pred_future_price)
-rmse = np.sqrt(mean_squared_error(test_future_price, pred_future_price))
-r2 = r2_score(test_future_price, pred_future_price)
+mae = mean_absolute_error(test_future_price, pred_future_price) #실제 미래 가격과 예측된 미래 가격 간의 MAE 계산. MAE는 예측값과 실제값 간의 절대 오차의 평균으로, 예측의 정확도를 평가하는 지표로 사용됨.
+rmse = np.sqrt(mean_squared_error(test_future_price, pred_future_price)) #실제 미래 가격과 예측된 미래 가격 간의 RMSE 계산. RMSE는 예측값과 실제값 간의 제곱 오차의 평균의 제곱근으로, MAE보다 큰 오차에 더 큰 패널티를 주는 지표로 사용됨.
+r2 = r2_score(test_future_price, pred_future_price) #실제 미래 가격과 예측된 미래 가격 간의 R² 계산. R²는 모델이 실제값의 분산을 얼마나 설명하는지를 나타내는 지표로, 1에 가까울수록 모델의 설명력이 높음을 의미함.
 
 actual_dir = test_future_price > test_current_price
 pred_dir = pred_future_price > test_current_price
-direction_acc = (actual_dir == pred_dir).mean()
+direction_acc = (actual_dir == pred_dir).mean() #예측된 미래 가격이 현재 가격보다 높은지 여부와 실제 미래 가격이 현재 가격보다 높은지 여부가 일치하는 비율을 계산하여 방향성 예측의 정확도를 평가하는 지표로 사용됨.
 
 mape = np.mean(np.abs((test_future_price - pred_future_price) / test_future_price)) * 100
 
@@ -332,6 +348,7 @@ result_df = pd.DataFrame({
 print("\nPrediction Sample:")
 print(result_df.head(10))
 
+"""
 # =========================================================
 # 17. 그래프 1: 미래 실제가격 vs 미래 예측가격
 # =========================================================
@@ -361,3 +378,4 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
+"""
