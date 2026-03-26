@@ -6,3 +6,4 @@ requests
 scikit-learn
 xgboost
 yfinance
+optuna
