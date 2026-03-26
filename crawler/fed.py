@@ -73,7 +73,7 @@ def crawl_implementation_note(url: str) -> dict:
         "release_date": release_date,
         "release_time": None,
         "title": title,
-        "body_text": body_text
+        "body": body_text
     }
 
 
@@ -143,7 +143,7 @@ def crawl_fomc_statement(url: str) -> dict:
         "release_date": release_date,
         "release_time": release_time,
         "title": title,
-        "body_text": body_text
+        "body": body_text
     }
 
 
@@ -191,117 +191,121 @@ def crawl_minutes(url: str) -> dict:
         "release_date": None,
         "release_time": None,
         "title": title,
-        "body_text": body_text
+        "body": body_text
     }
 
 
-# FOMC 캘린더 페이지 요청
-response = requests.get(CALENDAR_URL, headers=HEADERS, timeout=20)
-response.raise_for_status()
+def main() -> None:
+    # FOMC 캘린더 페이지 요청
+    response = requests.get(CALENDAR_URL, headers=HEADERS, timeout=20)
+    response.raise_for_status()
 
-# 캘린더 페이지 HTML 파싱
-soup = BeautifulSoup(response.text, "html.parser")
+    # 캘린더 페이지 HTML 파싱
+    soup = BeautifulSoup(response.text, "html.parser")
 
-results = []
+    results = []
 
-# 연도별 FOMC 섹션 탐색
-# 예: "2025 FOMC Meetings", "2024 FOMC Meetings"
-year_sections = soup.find_all("div", attrs={"class": "panel-heading"})
+    # 연도별 FOMC 섹션 탐색
+    # 예: "2025 FOMC Meetings", "2024 FOMC Meetings"
+    year_sections = soup.find_all("div", attrs={"class": "panel-heading"})
 
-for section in year_sections:
-    heading = section.find("h4")
-    if heading is None:
-        continue
+    for section in year_sections:
+        heading = section.find("h4")
+        if heading is None:
+            continue
 
-    # 연도 헤더에서 실제 FOMC 회의 연도인지 확인
-    heading_text = heading.get_text(" ", strip=True)
-    match = re.match(r"(\d{4}) FOMC Meetings", heading_text)
-    if not match:
-        continue
+        # 연도 헤더에서 실제 FOMC 회의 연도인지 확인
+        heading_text = heading.get_text(" ", strip=True)
+        match = re.match(r"(\d{4}) FOMC Meetings", heading_text)
+        if not match:
+            continue
 
-    print(match.group(1))
+        # 현재 연도 섹션 아래의 형제 노드들을 순서대로 확인
+        node = section.find_next_sibling()
 
-    # 현재 연도 섹션 아래의 형제 노드들을 순서대로 확인
-    node = section.find_next_sibling()
+        while node:
 
-    while node:
+            # strong 태그가 있는 노드만 회의 정보 블록으로 간주
+            if node.find("strong"):
 
-        # strong 태그가 있는 노드만 회의 정보 블록으로 간주
-        if node.find("strong"):
+                # 현재 노드의 첫 부분에서 월 이름 추출
+                # 현재 사이트 구조상 node.contents[1]에 월 텍스트가 들어 있음
+                text = node.contents[1].get_text(" ", strip=True)
 
-            # 현재 노드의 첫 부분에서 월 이름 추출
-            # 현재 사이트 구조상 node.contents[1]에 월 텍스트가 들어 있음
-            text = node.contents[1].get_text(" ", strip=True)
+                # 회의가 SEP인지 여부(월 매칭이 실패해도 기본값은 안전하게 유지)
+                is_sep = False
+                if text in MONTHS:
 
-            if text in MONTHS:
+                    # 현재 회의 날짜 범위 추출
+                    # 예: "27-28", "17-18*"
+                    date_node = node.contents[3]
+                    meeting_period = date_node.get_text(" ", strip=True)
 
-                # 현재 회의 날짜 범위 추출
-                # 예: "27-28", "17-18*"
-                date_node = node.contents[3]
-                meeting_period = date_node.get_text(" ", strip=True)
+                    # 별표(*)가 붙은 회의는 SEP 회의로 처리
+                    is_sep = "*" in meeting_period
 
-                # 별표(*)가 붙은 회의는 SEP 회의로 처리
-                is_sep = "*" in meeting_period
+                # 현재 회의 블록 안의 모든 링크 순회
+                for link in node.find_all("a", href=True):
 
-            # 현재 회의 블록 안의 모든 링크 순회
-            for link in node.find_all("a", href=True):
+                    label = link.get_text(" ", strip=True).lower()
+                    url = urljoin(BASE_URL, link["href"])
 
-                label = link.get_text(" ", strip=True).lower()
-                url = urljoin(BASE_URL, link["href"])
+                    doc_type = None
+                    article = None
 
-                doc_type = None
-                article = None
+                    # Implementation Note 링크인 경우
+                    if "implementation note" in label:
+                        doc_type = "implementation_note"
+                        article = crawl_implementation_note(url)
 
-                # Implementation Note 링크인 경우
-                if "implementation note" in label:
-                    doc_type = "statement"
-                    article = crawl_implementation_note(url)
+                    # HTML 링크인 경우 부모 strong 텍스트를 보고
+                    # Statement인지 Minutes인지 구분
+                    elif label == "html":
 
-                # HTML 링크인 경우 부모 strong 텍스트를 보고
-                # Statement인지 Minutes인지 구분
-                elif label == "html":
+                        parent_title = link.parent.strong.get_text(" ", strip=True).lower()
 
-                    parent_title = link.parent.strong.get_text(" ", strip=True).lower()
+                        if "statement:" in parent_title:
+                            doc_type = "statement"
+                            article = crawl_fomc_statement(url)
 
-                    if "statement:" in parent_title:
-                        doc_type = "statement"
-                        article = crawl_fomc_statement(url)
+                        elif "minutes:" in parent_title:
+                            doc_type = "minutes"
+                            article = crawl_minutes(url)
 
-                    elif "minutes:" in parent_title:
-                        doc_type = "minutes"
-                        article = crawl_minutes(url)
+                            # Minutes release 날짜는 개별 minutes 페이지가 아니라
+                            # 캘린더 페이지의 '(Released ...)' 문구에서 추출
+                            release_match = re.search(
+                                r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
+                                node.get_text(" ", strip=True)
+                            )
 
-                        # Minutes release 날짜는 개별 minutes 페이지가 아니라
-                        # 캘린더 페이지의 '(Released ...)' 문구에서 추출
-                        release_match = re.search(
-                            r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
-                            node.get_text(" ", strip=True)
-                        )
+                            release_date = release_match.group(1) if release_match else None
+                            article["release_date"] = release_date
 
-                        release_date = release_match.group(1) if release_match else None
-                        article["release_date"] = release_date
+                    # 정상적으로 문서 정보를 추출한 경우 결과 저장
+                    if doc_type and article:
+                        results.append({
+                            "release_date": article["release_date"],
+                            "release_time": article["release_time"],
+                            "is_sep": is_sep,
+                            "doc_type": doc_type,
+                            "url": url,
+                            "title": article["title"],
+                            "body": article["body"]
+                        })
 
-                # 정상적으로 문서 정보를 추출한 경우 결과 저장
-                if doc_type and article:
-                    results.append({
-                        "release_date": article["release_date"],
-                        "release_time": article["release_time"],
-                        "is_sep": is_sep,
-                        "doc_type": doc_type,
-                        "label": link.get_text(" ", strip=True),
-                        "url": url,
-                        "title": article["title"],
-                        "body_text": article["body_text"]
-                    })
+            # 다음 회의 블록으로 이동
+            time.sleep(0.5)
+            node = node.find_next_sibling()
 
-        # 다음 회의 블록으로 이동
-        time.sleep(0.5)
-        node = node.find_next_sibling()
+    # 결과를 데이터프레임으로 변환하고 중복 제거
+    df = pd.DataFrame(results).drop_duplicates()
 
-# 결과를 데이터프레임으로 변환하고 중복 제거
-df = pd.DataFrame(results).drop_duplicates()
+    print(df.head(20))
 
-print(df.head(20))
+    # CSV 파일로 저장
+    df.to_csv("fed_fomc_links.csv", index=False, encoding="utf-8-sig")
 
-# CSV 파일로 저장
-df.to_csv("fed_fomc_links.csv", index=False, encoding="utf-8-sig")
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,7 @@
+import argparse
 import re
 import time
+import random
 import certifi
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -8,6 +10,8 @@ from urllib.parse import urljoin
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, ElementClickInterceptedException
 from selenium.webdriver.chrome.options import Options
@@ -197,18 +201,46 @@ def parse_bis_article_html(html: str, url: str) -> Optional[Dict]:
     }
 
 
-def extract_article(url: str, sleep_sec: float = 0.5) -> Optional[Dict]:
+def create_requests_session() -> requests.Session:
     """
-    상세 페이지를 requests로 가져오되,
-    SSL 인증서 검증용 CA 번들을 명시한다.
+    BIS는 간헐적으로 느리거나(그에 따른 read timeout) rate limit(429)을 걸 수 있어,
+    재시도/백오프/커넥션 재사용이 있는 세션을 사용한다.
     """
     session = requests.Session()
     session.headers.update(HEADERS)
 
+    retry = Retry(
+        total=5,
+        connect=3,
+        read=5,
+        backoff_factor=1.0,
+        # 429/5xx는 재시도 대상으로 둔다.
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+        respect_retry_after_header=True,
+    )
+
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def extract_article(
+    url: str,
+    session: requests.Session,
+    sleep_sec: float = 0.5,
+) -> Optional[Dict]:
+    """
+    상세 페이지를 requests로 가져오되,
+    SSL 인증서 검증용 CA 번들을 명시한다.
+    """
     try:
         response = session.get(
             url,
-            timeout=20,
+            # connect와 read를 분리해서 read timeout 빈도를 줄인다.
+            timeout=(10, 60),
             verify=certifi.where(),
         )
         response.raise_for_status()
@@ -219,7 +251,8 @@ def extract_article(url: str, sleep_sec: float = 0.5) -> Optional[Dict]:
         print(f"  -> 상세 페이지 요청 실패: {e}")
         return None
 
-    time.sleep(sleep_sec)
+    # 레이트리밋을 덜 맞기 위해 약간의 지터를 추가한다.
+    time.sleep(sleep_sec + random.uniform(0, 0.5))
     return parse_bis_article_html(response.text, url)
 
 
@@ -342,10 +375,11 @@ def crawl_bis_press_releases(
     print(f"\n총 목록 수집 개수: {len(listing_items)}")
 
     results: List[Dict] = []
+    session = create_requests_session()
 
     for i, item in enumerate(listing_items, start=1):
         print(f"[ARTICLE {i}/{len(listing_items)}] {item['url']}")
-        article = extract_article(item["url"], sleep_sec=sleep_sec)
+        article = extract_article(item["url"], session=session, sleep_sec=sleep_sec)
 
         if not article:
             print("  -> 본문 추출 실패")
@@ -373,9 +407,15 @@ def crawl_bis_press_releases(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="BIS press release crawler")
+    parser.add_argument("--max-pages", type=int, default=5, help="목록 페이지 최대 탐색 수")
+    parser.add_argument("--sleep-sec", type=float, default=1.0, help="항목 간 대기(지터 포함)")
+    parser.add_argument("--output-csv", type=str, default="bis_press_releases.csv", help="저장 CSV 파일명")
+    args = parser.parse_args()
+
     df = crawl_bis_press_releases(
-        max_pages=2,
-        sleep_sec=1.0,
-        output_csv="bis_press_releases.csv",
+        max_pages=args.max_pages,
+        sleep_sec=args.sleep_sec,
+        output_csv=args.output_csv,
     )
     print(df.head())
