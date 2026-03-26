@@ -284,7 +284,7 @@ def crawl_whitehouse_qqq_policy(
 
 if __name__ == "__main__":
     df = crawl_whitehouse_qqq_policy(
-        max_pages=3,       # 처음엔 3~5페이지 정도로 테스트
+        max_pages=160,       # 처음엔 3~5페이지 정도로 테스트
         sleep_sec=1.2,
         output_csv="whitehouse_qqq_policy.csv"
     )
