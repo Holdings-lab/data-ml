@@ -348,6 +348,10 @@ result_df = pd.DataFrame({
 print("\nPrediction Sample:")
 print(result_df.head(10))
 
+<<<<<<< Updated upstream:training/train.py
+=======
+
+>>>>>>> Stashed changes:training/train_regression.py
 # =========================================================
 # 17. 그래프 1: 상승 확률
 # =========================================================
@@ -384,3 +388,5 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
 
 plt.tight_layout()
 plt.show()
+
+
