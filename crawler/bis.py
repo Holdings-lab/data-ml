@@ -194,7 +194,8 @@ def parse_bis_article_html(html: str, url: str) -> Optional[Dict]:
 
     return {
         "published_date": published_date,
-        "category": "press_release",
+        "category": "BIS",
+        "doc_type": "press_release",
         "title": title,
         "url": url,
         "body": body,
@@ -394,6 +395,7 @@ def crawl_bis_press_releases(
         keep_cols = [
             "published_date",
             "category",
+            "doc_type",
             "title",
             "url",
             "body",
@@ -408,7 +410,7 @@ def crawl_bis_press_releases(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BIS press release crawler")
-    parser.add_argument("--max-pages", type=int, default=5, help="목록 페이지 최대 탐색 수")
+    parser.add_argument("--max-pages", type=int, default=9, help="목록 페이지 최대 탐색 수")
     parser.add_argument("--sleep-sec", type=float, default=1.0, help="항목 간 대기(지터 포함)")
     parser.add_argument("--output-csv", type=str, default="bis_press_releases.csv", help="저장 CSV 파일명")
     args = parser.parse_args()

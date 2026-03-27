@@ -39,7 +39,8 @@ def merge_csvs_to_table(
     여러 CSV를 읽어서 아래 4컬럼만 남긴 테이블로 병합한다.
 
     - date: release_date / published_date / date (가능한 것 우선)
-    - category: category / doc_type / label (가능한 것 우선)
+    - category: category
+    - doc_type: doc_type
     - title: title
     - body: body_text / body
     - link: url / link
@@ -50,9 +51,10 @@ def merge_csvs_to_table(
         df = pd.read_csv(path, encoding=encoding)
 
         date_col = _pick_first_existing(df, ["date", "release_date", "published_date"])
-        category_col = _pick_first_existing(df, ["category", "doc_type", "label"])
+        category_col = _pick_first_existing(df, ["category"])
+        doc_type_col = _pick_first_existing(df, ["doc_type"])
         title_col = "title" if "title" in df.columns else None
-        body_col = _pick_first_existing(df, ["body_text", "body"])
+        body_col = _pick_first_existing(df, ["body"])
         link_col = _pick_first_existing(df, ["link", "url"])
 
         missing = [
@@ -60,6 +62,7 @@ def merge_csvs_to_table(
             for name, col in [
                 ("date", date_col),
                 ("category", category_col),
+                ("doc_type", doc_type_col),
                 ("title", title_col),
                 ("body", body_col),
                 ("link", link_col),
@@ -73,6 +76,7 @@ def merge_csvs_to_table(
             {
                 "date": _normalize_date_series(df[date_col]),
                 "category": df[category_col],
+                "doc_type": df[doc_type_col],
                 "title": df[title_col],
                 "body": df[body_col],
                 "link": df[link_col],
@@ -84,7 +88,7 @@ def merge_csvs_to_table(
     if drop_duplicates:
         merged = merged.drop_duplicates()
 
-    merged = merged[["date", "category", "title", "body", "link"]]
+    merged = merged[["date", "category", "doc_type", "title", "body", "link"]]
 
     if sort_by_date:
         # date는 문자열일 수 있으므로 안전하게 datetime으로 변환해 정렬한다.

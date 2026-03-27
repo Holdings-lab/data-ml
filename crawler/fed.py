@@ -288,6 +288,7 @@ def main() -> None:
                             "release_date": article["release_date"],
                             "release_time": article["release_time"],
                             "is_sep": is_sep,
+                            "category": "FOMC",
                             "doc_type": doc_type,
                             "url": url,
                             "title": article["title"],

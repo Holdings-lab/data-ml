@@ -1,9 +1,8 @@
 import pandas as pd
 
-dataset = pd.read_csv("fed_fomc_links_summarized.csv")
-text_lengths = dataset["body"].fillna("").astype(str).str.len()
-print(text_lengths.to_string())
-print(dataset["doc_type"].head(30).to_string(index=False))
+merged = pd.read_csv("merged_finbert.csv")
+print(merged.columns)
+print(merged[merged["body_sentiment_score"]>0.5])
 
 # dataset2 = pd.read_csv("whitehouse_qqq_policy.csv")
 # text_lengths2 = dataset2["body"].fillna("").astype(str).str.len()
