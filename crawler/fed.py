@@ -6,6 +6,8 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from data_paths import csv_path
+
 BASE_URL = "https://www.federalreserve.gov"
 CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
@@ -288,6 +290,7 @@ def main() -> None:
                             "release_date": article["release_date"],
                             "release_time": article["release_time"],
                             "is_sep": is_sep,
+                            "category": "FOMC",
                             "doc_type": doc_type,
                             "url": url,
                             "title": article["title"],
@@ -304,7 +307,7 @@ def main() -> None:
     print(df.head(20))
 
     # CSV 파일로 저장
-    df.to_csv("fed_fomc_links.csv", index=False, encoding="utf-8-sig")
+    df.to_csv(csv_path("fed_fomc_links.csv"), index=False, encoding="utf-8-sig")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from data_paths import csv_path
+
 BASE_URL = "https://www.whitehouse.gov"
 NEWS_URL = f"{BASE_URL}/news/"
 
@@ -26,7 +28,7 @@ QQQ_KEYWORDS = [
 ]
 
 # 카테고리 추출용 후보
-CATEGORY_CANDIDATES = {
+DOC_TYPE_CANDIDATES = {
     "Articles",
     "Briefings & Statements",
     "Fact Sheets",
@@ -81,7 +83,7 @@ def find_news_cards(soup: BeautifulSoup) -> List[BeautifulSoup]:
 def parse_listing_item(tag: BeautifulSoup) -> Optional[Dict]:
     """
     목록 페이지의 카드에서
-    title / url / category / published_date 를 최대한 추출
+    title / url / doc_type / published_date 를 최대한 추출
     """
     a = tag.find("a", href=True)
     if not a:
@@ -113,16 +115,17 @@ def parse_listing_item(tag: BeautifulSoup) -> Optional[Dict]:
         published_date = None
 
     # 카테고리 추정
-    category = None
-    for candidate in CATEGORY_CANDIDATES:
+    doc_type = None
+    for candidate in DOC_TYPE_CANDIDATES:
         if candidate.lower() in type.lower():
-            category = candidate
+            doc_type = candidate
             break
 
     return {
         "title": title,
         "url": url,
-        "category": category,
+        "category": "White House",
+        "doc_type": doc_type,
         "published_date": published_date,
     }
 
@@ -230,7 +233,7 @@ def parse_article(metadata: Optional[Dict]) -> Optional[Dict]:
 def crawl_whitehouse_qqq_policy(
     max_pages: int = 10,
     sleep_sec: float = 1.0,
-    output_csv: str = "whitehouse_qqq_policy.csv"
+    output_csv: str = csv_path("whitehouse_qqq_policy.csv")
 ) -> pd.DataFrame:
     """
     1) 뉴스 인덱스 수집
@@ -272,7 +275,7 @@ def crawl_whitehouse_qqq_policy(
     if not df.empty:
         # 본문이 너무 길면 필요에 따라 일부 컬럼만 저장 가능
         df = df[[
-            "published_date", "category", "title", "url",
+            "published_date", "category", "doc_type", "title", "url",
             "matched_keywords", "body"
         ]].sort_values(by="published_date", ascending=False, na_position="last")
 
@@ -286,7 +289,7 @@ if __name__ == "__main__":
     df = crawl_whitehouse_qqq_policy(
         max_pages=160,       # 처음엔 3~5페이지 정도로 테스트
         sleep_sec=1.2,
-        output_csv="whitehouse_qqq_policy.csv"
+        output_csv=csv_path("whitehouse_qqq_policy.csv")
     )
 
     print(df.head(10))
