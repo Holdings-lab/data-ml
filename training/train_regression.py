@@ -44,7 +44,7 @@ tickers = [target, "SPY", "^VIX", "TLT", "HYG", "UUP"]
 raw = yf.download(
     tickers=tickers,
     start="2015-01-01",
-    end="2026-01-01",
+    end="2026-03-01",
     auto_adjust=True, #주가 조정 (배당금, 액면분할 등) 반영된 가격 사용/ if, False면 조정 안된 가격 사용
     progress=False
 )
@@ -226,32 +226,119 @@ df["vol_breakout"] = df["ret_1"] / (df["vol_5"] + 1e-9)
 df["bb_high_dist"] = (df["target_high"] - bb_upper) / (bb_upper + 1e-9)
 
 # =========================================================
+# 8. FinBERT 뉴스 감성 데이터 추가 (merged_finbert.csv)
+# =========================================================
+import os
+
+print("뉴스 데이터(merged_finbert.csv) 로드 및 병합 중...")
+
+# 현재 파일(train_regression.py) 위치 기준으로 상위 폴더의 data/merged_finbert.csv 경로 찾기
+current_dir = os.path.dirname(os.path.abspath(__file__))
+csv_path = os.path.join(current_dir, "..", "data", "merged_finbert.csv")
+
+# 1. 뉴스 데이터 불러오기
+news_df = pd.read_csv(csv_path)
+news_df['date'] = pd.to_datetime(news_df['date']).dt.tz_localize(None)
+
+# 2. 사용할 Feature 컬럼만 선택
+news_cols =[
+    'date', 'category_BIS', 'category_FOMC', 'category_White House',
+    'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos', 'is_weekend',
+    'title_positive_prob', 'title_negative_prob', 'title_neutral_prob', 'title_sentiment_score',
+    'body_positive_prob', 'body_negative_prob', 'body_neutral_prob', 'body_sentiment_score',
+    'body_n_chunks'
+]
+news_df = news_df[news_cols]
+
+# 3. 주말(토, 일) 뉴스를 다음 영업일(월요일)로 미루기 (주말 뉴스가 월요일 장에 미치는 영향 반영)
+# 요일: 5=토요일(+2일), 6=일요일(+1일)
+news_df['date'] = news_df['date'] + pd.to_timedelta(
+    np.where(news_df['date'].dt.dayofweek == 5, 2, 
+    np.where(news_df['date'].dt.dayofweek == 6, 1, 0)), unit='D'
+)
+
+# 4. 같은 날짜(하루)에 나온 뉴스들을 평균내기 (하루 1개의 행으로 압축)
+daily_news = news_df.groupby('date').mean().reset_index()
+
+# 5. 기존 주가 DataFrame(df)과 병합하기
+# yfinance에서 받아온 Date 컬럼의 타임존(timezone)을 제거해야 병합 시 에러가 나지 않습니다.
+df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None) 
+df = pd.merge(df, daily_news, left_on='Date', right_on='date', how='left')
+
+# 6. 뉴스가 없는 날(NaN) 결측치 처리
+# 뉴스가 없는 날은 중립(neutral) 1.0, 긍정/부정 및 점수는 0으로 세팅
+df['title_neutral_prob'] = df['title_neutral_prob'].fillna(1.0)
+df['body_neutral_prob'] = df['body_neutral_prob'].fillna(1.0)
+
+sentiment_fill_zero_cols =[
+    'title_positive_prob', 'title_negative_prob', 'title_sentiment_score',
+    'body_positive_prob', 'body_negative_prob', 'body_sentiment_score',
+    'category_BIS', 'category_FOMC', 'category_White House', 'body_n_chunks'
+]
+df[sentiment_fill_zero_cols] = df[sentiment_fill_zero_cols].fillna(method='ffill').fillna(0.0)
+
+# 7. 요일/월 변환 등 나머지 변수들은 이전 영업일 값을 가져오거나 0으로 채움
+df.fillna(method='ffill', inplace=True) 
+df.fillna(0, inplace=True)
+
+# =========================================================
+# 8-1. 뉴스 감성 파생 변수 생성 (영향력 극대화)
+# =========================================================
+# 1. 최근 3일, 5일간의 평균 감성 점수 (누적된 분위기)
+df['body_sentiment_3d_mean'] = df['body_sentiment_score'].rolling(3).mean()
+df['body_sentiment_5d_mean'] = df['body_sentiment_score'].rolling(5).mean()
+df['title_sentiment_3d_mean'] = df['title_sentiment_score'].rolling(3).mean()
+
+# 2. 감성 점수의 변화량 (뉴스가 어제보다 긍정적으로 변했는가?)
+df['body_sentiment_trend'] = df['body_sentiment_score'] - df['body_sentiment_score'].shift(3)
+df['title_sentiment_trend'] = df['title_sentiment_score'] - df['title_sentiment_score'].shift(3)
+
+# 3. 부정적 뉴스의 급증 여부 (악재 터짐 감지)
+df['negative_news_spike'] = df['body_negative_prob'] / (df['body_negative_prob'].rolling(10).mean() + 1e-9)
+
+df.fillna(0, inplace=True) # 새로 생긴 결측치 제거
+
+# --- [정예 피처 1: 뉴스 감성 엔진 개조] ---
+# 단순 확률 대신 '긍정-부정 격차'와 '갑작스러운 뉴스 변화(Shock)'에 집중
+df['sentiment_gap'] = df['title_positive_prob'] - df['title_negative_prob']
+df['body_sentiment_gap'] = df['body_positive_prob'] - df['body_negative_prob']
+df['sentiment_shock'] = df['sentiment_gap'] - df['sentiment_gap'].rolling(5).mean()
+
+# --- [정예 피처 2: 가격 가속도 및 변동성 폭발] ---
+# 단순 수익률 대신 상승세가 붙었는지(가속도), 변동성이 갑자기 터졌는지 확인
+df['ret_accel'] = df['ret_1'] - df['ret_5']  # 최근 1일 수익률이 5일 평균보다 강한가?
+df['vol_shock'] = df['vol_5'] / (df['vol_20'] + 1e-9) # 평소보다 변동성이 꿈동거리는가?
+df['dist_to_ma5'] = price / price.rolling(5).mean() - 1.0 # 5일선 대비 과이격 여부
+
+# --- [정예 피처 3: 시장 상대 강도 (Alpha)] ---
+# 나스닥이 시장(SPY)보다 유난히 강한가, 약한가? (5일 기준)
+df['rel_strength_5'] = price.pct_change(5) - spy.pct_change(5)
+
+# --- [정예 피처 4: 거시경제 압박 (Macro Shock)] ---
+# 5일 뒤를 예측하므로 거시 지표도 5일치 변화량을 사용
+df['uup_shock_5'] = uup.pct_change(5) # 달러가 5일간 급등했는가? (나스닥에 악재)
+df['tlt_shock_5'] = tlt.pct_change(5) # 국채가격이 5일간 급락(금리급등)했는가?
+df['vix_z_score_5'] = (vix - vix.rolling(5).mean()) / (vix.rolling(5).std() + 1e-9)
+
+# =========================================================
 # 9. feature 선택
 # =========================================================
 feature_cols = [
-    "ret_1", "ret_3", "ret_5", "ret_10", "ret_20",
-    "vol_5", "vol_10", "vol_20",
+    #다른 feature 따로 저장
 
-    "price_to_ma_5", "price_to_ma_10", "price_to_ma_20",
-    "price_to_ma_60", "price_to_ma_120", 
+    # 핵심 감성 (Shock 위주)
+    "sentiment_gap", "body_sentiment_gap", "sentiment_shock", "body_sentiment_score",
+    
+    # 가격 동력 (Momentum & Accel)
+    "ret_5", "ret_accel", "dist_to_ma5", "bb_pos", "rsi_14",
+    
+    # 변동성 및 위험 (Risk)
+    "vol_shock", "vix_z_score_5", "drawdown", "vol_ratio",
+    
+    # 거시 및 상대강도 (Macro & Alpha)
+    "rel_strength_5", "uup_shock_5", "tlt_shock_5", "hyg_ret", "target_spy_rel_ret"
 
-    "slope_20", "slope_60", "slope_120", 
-
-    "vol_chg_1", "vol_to_ma20",
-    "intraday_range", "close_open",
-
-    "rsi_14", "macd", "macd_signal", "macd_hist",
-    "bb_width", "bb_pos",
-
-    "spy_ret_1", "spy_ret_5", "spy_ret_20", "spy_to_ma_60",
-    "vix_level", "vix_ret_1", "vix_ret_5", "vix_to_ma_20",
-    "tlt_ret_1", "tlt_ret_5", "tlt_ret_20", "tlt_to_ma_60",
-
-    "target_spy_ratio_20",
-    "target_tlt_ratio_20",
-
-    "hyg_ret", "uup_ret", "drawdown", "target_spy_rel_ret", "target_tlt_rel_ret", "hyg_z_score", "uup_z_score", 
-    "vix_z_score", "vol_ratio","ret_accel", "vix_speed", "dist_10", "vol_breakout", "bb_high_dist"
+    
 ]
 
 """
@@ -291,10 +378,10 @@ best_features = []
 
 print("=== 🔍 [통합 최적화] 최적의 조합 탐색 시작 ===")
 
-for h in range(15,16):
+for h in range(5,6):
     # 1. 해당 Horizon용 데이터 세팅 (타겟 생성 등)
     df_h = df.copy()
-    df_h["target_logret"] = np.log(df_h["target_price"].shift(-h) / df_h["target_price"])
+    df_h["target_logret"] = np.log(df_h["target_price"].shift(-h) / df_h["target_price"])*100
     df_h = df_h.dropna().copy()
     
     # 2. 피처/타겟 분리
@@ -312,7 +399,7 @@ for h in range(15,16):
     
     # 중요도 순으로 상위 25개 피처 추출
     importances = pd.Series(selector.feature_importances_, index=feature_cols)
-    current_top_25 = importances.sort_values(ascending=False).head(25).index.tolist()
+    current_top_25 = importances.sort_values(ascending=False).head(15).index.tolist()
 
     # -----------------------------------------------------
     # Step B: 뽑힌 25개 피처로만 교차 검증 (실력 테스트)
@@ -349,11 +436,11 @@ for h in range(15,16):
 print("\n" + "="*50)
 print(f"🎉 최적의 Horizon 발견: {best_horizon}일")
 print(f"📈 최고 예측 정확도: {best_overall_acc*100:.2f}%")
-print(f"🛠 선택된 정예 피처 30개: \n{best_features}")
+print(f"🛠 선택된 정예 피처 40개: \n{best_features}")
 print("="*50)
 
 horizon = int(best_horizon) #타겟 날짜
-df["target_logret_2d"] = np.log(price.shift(-horizon) / price)
+df["target_logret_2d"] = np.log(price.shift(-horizon) / price) *100
 df["target_future_price"] = price.shift(-horizon)
 df["target_date"] = df["Date"].shift(-horizon)
 
@@ -386,13 +473,13 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 def objective(trial):
     param = {
         "n_estimators": trial.suggest_int("n_estimators", 100, 500),
-        "max_depth": trial.suggest_int("max_depth", 3, 8), # 조금 더 깊게 탐색 허용 10일 예측시 (3,8) 20일 예측시 (5,8)
-        "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05, log=True),
+        "max_depth": trial.suggest_int("max_depth", 4, 6), # 조금 더 깊게 탐색 허용 10일 예측시 (3,8) 20일 예측시 (5,8)
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
         "subsample": trial.suggest_float("subsample", 0.5, 0.9),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.9),
         "random_state": 42,
         "tree_method": "hist",
-        "objective": "reg:squarederror"
+        "objective": "reg:squarederror",
     }
     
     tscv = TimeSeriesSplit(n_splits=4)
@@ -437,7 +524,7 @@ def objective(trial):
             목표: "틀려서 감점당하는 게 제일 무서워! 실제 가격이랑 최대한 비슷하게 대답할래."
             정확도(Acc): 낮아질 가능성이 큽니다. 방향을 맞추는 것보다 실제 가격과의 '거리'를 좁히는 데 에너지를 다 쓰기 때문입니다.
             그래프: 실제 가격에 찰떡처럼 달라붙습니다. 오차를 줄여야 점수를 받으므로, 모델이 실제 주가의 출렁임을 필사적으로 흉내 냅니다."""
-        score = acc - (rmse * 3) 
+        score = acc - (rmse * 0.01) 
         
         combined_scores.append(score)
     
@@ -466,7 +553,7 @@ best_model.fit(X_train, y_train)
 pred_logret = best_model.predict(X_test)
 
 # 로그수익률 -> 미래 가격 복원
-pred_future_price = test_current_price * np.exp(pred_logret)
+pred_future_price = test_current_price * np.exp(pred_logret/100.0)
 
 # =========================================================
 # 14. 평가
@@ -500,7 +587,7 @@ print("Baseline MAPE(%):", round(baseline_mape, 4))
 
 # 중요도 확인
 from xgboost import plot_importance
-plot_importance(best_model, max_num_features=15, importance_type="gain")
+plot_importance(best_model, max_num_features=25, importance_type="gain")
 plt.show()
 
 # =========================================================
@@ -516,7 +603,38 @@ result_df = pd.DataFrame({
 })
 
 print("\nPrediction Sample:")
-print(result_df.head(10))
+print(result_df.head(15))
+
+# --- [하락/상승 예측 정밀 검증 로직] ---
+
+# 1. 확신도 상위 20% 지점 계산 (절대값 기준)
+conf_cutoff = result_df['Pred_LogRet'].abs().quantile(0.8)
+high_conf_df = result_df[result_df['Pred_LogRet'].abs() >= conf_cutoff].copy()
+
+# 2. 고확신 구간 내에서 '상승 예측'과 '하락 예측' 분리
+long_preds = high_conf_df[high_conf_df['Pred_LogRet'] > 0]
+short_preds = high_conf_df[high_conf_df['Pred_LogRet'] < 0]
+
+# 3. 각각의 정확도 계산
+# (실제 미래가격이 현재보다 낮으면 하락 적중)
+long_acc = (long_preds['Actual_Future_Price'] > long_preds['Current_Price']).mean() if len(long_preds) > 0 else 0
+short_acc = (short_preds['Actual_Future_Price'] < short_preds['Current_Price']).mean() if len(short_preds) > 0 else 0
+
+print("\n" + "="*50)
+print(f"🎯 [고확신 상위 20% 구간] 정밀 분석 리포트")
+print(f"기준 문턱값(LogRet 절대값): {conf_cutoff:.4f}")
+print("-" * 50)
+print(f"1. 상승(Long) 확신 시 정확도: {long_acc*100:.2f}% (샘플 수: {len(long_preds)}개)")
+print(f"2. 하락(Short) 확신 시 정확도: {short_acc*100:.2f}% (샘플 수: {len(short_preds)}개)")
+print("="*50)
+
+# 4. 해석 가이드
+if short_acc > 0.5:
+    print("💡 분석 결과: 모델이 하락할 때를 꽤 잘 맞춥니다! '천재형' 모델에 가깝습니다.")
+elif len(short_preds) == 0:
+    print("⚠️ 분석 결과: 모델이 하락을 아예 예측하지 않습니다. 상승장 편향이 심합니다.")
+else:
+    print("📉 분석 결과: 하락 예측은 잘 못 맞춥니다. 상승장에만 강한 모델입니다.")
 
 # 한글 깨짐 방지 (필요시)
 plt.rcParams['font.family'] = 'Malgun Gothic'
@@ -562,7 +680,7 @@ plt.show()
 
 # 1. 테스트할 문턱(Threshold) 후보들 
 # (예: 0%, 1%, 2%, 3% 이상 상승 예측 시에만 매수)
-thresholds = [0, 0.002, 0.004, 0.006] 
+thresholds = [0, 0.05, 0.1, 0.15, 0.2] 
 
 plt.figure(figsize=(14, 8))
 
@@ -582,7 +700,7 @@ for th in thresholds:
     strat_ret = result_df[f'Signal_{th}'].shift(1).fillna(0) * market_ret
     cum_strat = (1 + strat_ret).cumprod()
     
-    plt.plot(result_df['Target_Date'], cum_strat, label=f'Strategy (Th > {th*100:.1f}%)', linewidth=2)
+    plt.plot(result_df['Target_Date'], cum_strat, label=f'Strategy (Th > {th:.2f}%)', linewidth=2)
 
 plt.title(f"예측 확신도(Threshold)에 따른 수익률 비교 (Horizon: {horizon}일)")
 plt.xlabel("Date")
@@ -596,7 +714,7 @@ print("=== 📊 문턱별 최종 누적 수익률 ===")
 print(f"Market (Hold) : {cum_market.iloc[-1]:.2f}")
 for th in thresholds:
     final_ret = (1 + (result_df[f'Signal_{th}'].shift(1).fillna(0) * market_ret)).cumprod().iloc[-1]
-    print(f"Threshold {th*100:.1f}% : {final_ret:.2f}")
+    print(f"Threshold {th:.1f}% : {final_ret:.2f}")
 
 # =========================================================
 # 12-1. 모델 및 메타데이터 저장
@@ -641,3 +759,45 @@ print("\n✅ 모델과 메타데이터가 저장되었습니다. (qqq_xgboost_mo
     3) 문턱이 너무 높으면?:
         만약 문턱을 3%(0.03)로 잡았는데 수익률이 1.0 근처에서 거의 안 움직인다면, 모델이 그만큼 확신하는 경우가 거의 없어서 아무것도 안 했다는 뜻입니다.
 """
+
+# =========================================================
+# 🎯 베이스라인 정확도 테스트 (Baseline Accuracy)
+# =========================================================
+# 예측할 기간(일수)을 여기에 하드코딩 하세요 (예: 1, 3, 5, 15)
+baseline_horizon = 5
+
+print(f"\n=== 📊 베이스라인 정확도 계산 (Horizon: {baseline_horizon}일) ===")
+
+# 1. 타겟 생성: baseline_horizon 일 뒤의 가격이 오늘보다 올랐는가? (1: 상승, 0: 하락/보합)
+df_base = df.copy()
+df_base['actual_direction'] = (df_base['target_price'].shift(-baseline_horizon) > df_base['target_price']).astype(int)
+
+# 미래 가격을 알 수 없는 마지막 행들 제거
+df_base = df_base.dropna(subset=['actual_direction'])
+
+# 2. Train / Test 분리 (기존 머신러닝 모델과 동일하게 80% 지점에서 분리)
+split_idx = int(len(df_base) * 0.8)
+test_data = df_base.iloc[split_idx:].copy()
+
+# ---------------------------------------------------------
+# 베이스라인 1: "무조건 상승(Always Up)" 전략
+# (나스닥은 우상향하므로, 눈 감고 무조건 오른다고 찍었을 때의 정답률)
+# ---------------------------------------------------------
+always_up_acc = test_data['actual_direction'].mean()
+
+# ---------------------------------------------------------
+# 베이스라인 2: "최근 추세 유지(Momentum)" 전략
+# (과거 baseline_horizon 일 동안 올랐으면 다음에도 오르고, 내렸으면 내린다고 찍기)
+# ---------------------------------------------------------
+test_data['past_direction'] = (test_data['target_price'] > test_data['target_price'].shift(baseline_horizon)).astype(int)
+momentum_acc = (test_data['actual_direction'] == test_data['past_direction']).mean()
+
+# ---------------------------------------------------------
+# 베이스라인 3: "동전 던지기(Random 50:50)" 전략
+# ---------------------------------------------------------
+random_acc = 0.50
+
+print(f"1. 무조건 상승(Always Up) 예측 정확도 : {always_up_acc * 100:.2f}%")
+print(f"2. 최근 추세 유지(Momentum) 예측 정확도: {momentum_acc * 100:.2f}%")
+print(f"3. 동전 던지기(Random) 예측 정확도     : {random_acc * 100:.2f}%")
+print("======================================================\n")
