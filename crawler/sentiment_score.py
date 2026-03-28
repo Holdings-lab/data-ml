@@ -1,6 +1,7 @@
 import re
 import pandas as pd
 from transformers import pipeline
+from data_paths import csv_path
 
 try:
     import torch
@@ -15,8 +16,8 @@ except ImportError as exc:
 # =========================
 # Config
 # =========================
-INPUT_CSV = "merged_table_sorted.csv"
-OUTPUT_CSV = "merged_finbert.csv"
+INPUT_CSV = csv_path("merged_table_sorted_time_features.csv")
+OUTPUT_CSV = csv_path("merged_finbert.csv")
 
 TITLE_COL = "title"
 BODY_COL = "body"
@@ -204,7 +205,7 @@ def analyze_titles(titles: list[str], batch_size: int = 8) -> list[dict]:
     return [format_title_result(result) for result in title_scores]
 
 
-def empty_body_result(raw_body_length: int = 0) -> dict:
+def empty_body_result() -> dict:
     """
     본문이 비어 있을 때 반환할 기본 결과.
     """
@@ -214,7 +215,6 @@ def empty_body_result(raw_body_length: int = 0) -> dict:
         "body_neutral_prob": None,
         "body_sentiment_score": None,
         "body_n_chunks": 0,
-        "raw_body_length": raw_body_length,
     }
 
 
@@ -241,10 +241,9 @@ def analyze_bodies(bodies: list[str], max_chars: int = 800, batch_size: int = 8)
     score_start = 0
 
     for body, chunks in zip(cleaned_bodies, chunks_per_body):
-        raw_body_length = len(body)
 
         if not body or not chunks:
-            results.append(empty_body_result(raw_body_length=raw_body_length))
+            results.append(empty_body_result())
             continue
 
         # 현재 기사에 해당하는 청크 점수 구간만 잘라서 사용한다.
@@ -263,7 +262,6 @@ def analyze_bodies(bodies: list[str], max_chars: int = 800, batch_size: int = 8)
             "body_neutral_prob": avg["neutral_prob"],
             "body_sentiment_score": avg["sentiment_score"],
             "body_n_chunks": len(chunks),
-            "raw_body_length": raw_body_length,
         })
 
     return results
@@ -314,7 +312,6 @@ def main():
         "title_sentiment_score",
         "body_sentiment_score",
         "body_n_chunks",
-        "raw_body_length",
     ]
     print(df[preview_cols].head(10))
 

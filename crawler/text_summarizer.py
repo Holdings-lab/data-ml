@@ -6,9 +6,11 @@ from typing import Any, Dict, List
 import pandas as pd
 import requests
 
+from data_paths import csv_path
 
-INPUT_CSV = "whitehouse_qqq_policy.csv"
-OUTPUT_CSV = "whitehouse_qqq_policy_summarized.csv"
+
+INPUT_CSV = csv_path("bis_press_releases.csv")
+OUTPUT_CSV = csv_path("bis_press_releases_summarized.csv")
 BODY_COL = "body"
 ORIGINAL_LENGTH_COL = "body_original_length"
 MAX_CHARS = 10_000
@@ -223,10 +225,7 @@ def _resolve_input_path(filename: str) -> str:
     """
     입력 파일을 1) 현재 작업 디렉토리, 2) 스크립트가 있는 디렉토리 순서로 찾는다.
     """
-    candidates = [
-        filename,
-        os.path.join(os.path.dirname(__file__), filename),
-    ]
+    candidates = [filename]
 
     for c in candidates:
         if os.path.exists(c):
@@ -242,7 +241,7 @@ def _resolve_input_path(filename: str) -> str:
 def main() -> None:
     _check_ollama()
     input_path = _resolve_input_path(INPUT_CSV)
-    output_path = os.path.join(os.path.dirname(input_path), OUTPUT_CSV)
+    output_path = OUTPUT_CSV
 
     df = pd.read_csv(input_path, encoding="utf-8-sig")
 
@@ -272,7 +271,7 @@ def main() -> None:
         if i < len(indices):
             time.sleep(SLEEP_BETWEEN_CALLS_SEC)
 
-    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"[DONE] 저장 완료: {output_path}")
 
 

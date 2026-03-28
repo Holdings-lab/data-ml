@@ -8,6 +8,8 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from data_paths import csv_path
+
 BASE_URL = "https://www.whitehouse.gov"
 NEWS_URL = f"{BASE_URL}/news/"
 
@@ -231,7 +233,7 @@ def parse_article(metadata: Optional[Dict]) -> Optional[Dict]:
 def crawl_whitehouse_qqq_policy(
     max_pages: int = 10,
     sleep_sec: float = 1.0,
-    output_csv: str = "whitehouse_qqq_policy.csv"
+    output_csv: str = csv_path("whitehouse_qqq_policy.csv")
 ) -> pd.DataFrame:
     """
     1) 뉴스 인덱스 수집
@@ -287,7 +289,7 @@ if __name__ == "__main__":
     df = crawl_whitehouse_qqq_policy(
         max_pages=160,       # 처음엔 3~5페이지 정도로 테스트
         sleep_sec=1.2,
-        output_csv="whitehouse_qqq_policy.csv"
+        output_csv=csv_path("whitehouse_qqq_policy.csv")
     )
 
     print(df.head(10))

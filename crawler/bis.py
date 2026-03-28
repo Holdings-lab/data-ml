@@ -19,6 +19,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from data_paths import csv_path
+
 
 BASE_URL = "https://www.bis.gov"
 START_URL = "https://www.bis.gov/news-updates"
@@ -361,7 +363,7 @@ def crawl_bis_news_index_selenium(
 def crawl_bis_press_releases(
     max_pages: int = 5,
     sleep_sec: float = 1.0,
-    output_csv: str = "bis_press_releases.csv",
+    output_csv: str = csv_path("bis_press_releases.csv"),
 ) -> pd.DataFrame:
     """
     1) Selenium으로 목록 링크 수집
@@ -412,7 +414,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BIS press release crawler")
     parser.add_argument("--max-pages", type=int, default=9, help="목록 페이지 최대 탐색 수")
     parser.add_argument("--sleep-sec", type=float, default=1.0, help="항목 간 대기(지터 포함)")
-    parser.add_argument("--output-csv", type=str, default="bis_press_releases.csv", help="저장 CSV 파일명")
+    parser.add_argument("--output-csv", type=str, default=csv_path("bis_press_releases.csv"), help="저장 CSV 파일명")
     args = parser.parse_args()
 
     df = crawl_bis_press_releases(

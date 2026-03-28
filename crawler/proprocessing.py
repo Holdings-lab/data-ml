@@ -5,11 +5,15 @@ from typing import Iterable, List, Optional
 import numpy as np
 import pandas as pd
 
+from data_paths import csv_path
 
-DEFAULT_MERGED_OUTPUT_CSV = "merged_table_sorted.csv"
-DEFAULT_ENCODED_OUTPUT_CSV = "merged_table_sorted_encoded.csv"
-DEFAULT_TIME_FEATURES_OUTPUT_CSV = "merged_table_sorted_time_features.csv"
+
+DEFAULT_MERGED_OUTPUT_CSV = csv_path("merged_table_sorted.csv")
+DEFAULT_ENCODED_OUTPUT_CSV = csv_path("merged_table_sorted_encoded.csv")
+DEFAULT_TIME_FEATURES_OUTPUT_CSV = csv_path("merged_table_sorted_time_features.csv")
 DATE_COL = "date"
+BODY_COL = "body"
+BODY_LENGTH_COL = "body_original_length"
 
 
 def _pick_first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
@@ -81,13 +85,15 @@ def merge_csvs_to_table(
                 f"Available columns: {list(df.columns)}"
             )
 
+        body_series = df[body_col].fillna("").astype(str)
         out = pd.DataFrame(
             {
                 "date": _normalize_date_series(df[date_col]),
                 "category": df[category_col],
                 "doc_type": df[doc_type_col],
                 "title": df[title_col],
-                "body": df[body_col],
+                "body": body_series,
+                "body_original_length": body_series.str.len(),
                 "link": df[link_col],
             }
         )
@@ -97,7 +103,7 @@ def merge_csvs_to_table(
     if drop_duplicates:
         merged = merged.drop_duplicates()
 
-    merged = merged[["date", "category", "doc_type", "title", "body", "link"]]
+    merged = merged[["date", "category", "doc_type", "title", "body", "body_original_length", "link"]]
 
     if sort_by_date:
         sort_key = pd.to_datetime(merged["date"], errors="coerce")
@@ -197,9 +203,9 @@ def read_csv_and_add_cyclical_time_features(
 
 def main() -> None:
     csv_paths = [
-        "fed_fomc_links_summarized.csv",
-        "whitehouse_qqq_policy_summarized.csv",
-        "bis_press_releases.csv",
+        csv_path("fed_fomc_links_summarized.csv"),
+        csv_path("whitehouse_qqq_policy_summarized.csv"),
+        csv_path("bis_press_releases.csv"),
     ]
 
     merged = merge_csvs_to_table(csv_paths)
