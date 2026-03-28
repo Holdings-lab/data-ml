@@ -10,6 +10,7 @@ import requests
 INPUT_CSV = "whitehouse_qqq_policy.csv"
 OUTPUT_CSV = "whitehouse_qqq_policy_summarized.csv"
 BODY_COL = "body"
+ORIGINAL_LENGTH_COL = "body_original_length"
 MAX_CHARS = 10_000
 SLEEP_BETWEEN_CALLS_SEC = 0.5
 
@@ -250,6 +251,7 @@ def main() -> None:
 
     df[BODY_COL] = df[BODY_COL].fillna("").astype(str)
     lengths = df[BODY_COL].str.len()
+    df[ORIGINAL_LENGTH_COL] = lengths
     need_summary_mask = lengths >= MAX_CHARS
 
     indices = df.index[need_summary_mask].tolist()

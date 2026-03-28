@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional
 
+import numpy as np
 import pandas as pd
+
+
+DEFAULT_MERGED_OUTPUT_CSV = "merged_table_sorted.csv"
+DEFAULT_ENCODED_OUTPUT_CSV = "merged_table_sorted_encoded.csv"
+DEFAULT_TIME_FEATURES_OUTPUT_CSV = "merged_table_sorted_time_features.csv"
+DATE_COL = "date"
 
 
 def _pick_first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
@@ -14,16 +21,14 @@ def _pick_first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optiona
 
 def _normalize_date_series(s: pd.Series) -> pd.Series:
     """
-    날짜 컬럼을 최대한 'YYYY-MM-DD' 문자열로 맞춘다.
-    변환 실패한 값은 원본 문자열을 그대로 둔다.
+    Normalize a date-like series to 'YYYY-MM-DD' strings when possible.
+    If parsing fails, keep the original non-empty string value.
     """
     raw = s.astype(str)
     raw_clean = raw.where(~raw.str.lower().isin(["nan", "none", "nat"]), other=pd.NA)
 
     dt = pd.to_datetime(raw_clean, errors="coerce")
     out = dt.dt.strftime("%Y-%m-%d")
-
-    # 변환 실패한 행은 원본 문자열 유지
     out = out.where(~dt.isna(), other=raw_clean)
     return out
 
@@ -36,14 +41,15 @@ def merge_csvs_to_table(
     ascending: bool = True,
 ) -> pd.DataFrame:
     """
-    여러 CSV를 읽어서 아래 4컬럼만 남긴 테이블로 병합한다.
+    Read multiple CSV files and merge them into a standardized table.
 
-    - date: release_date / published_date / date (가능한 것 우선)
+    Output columns:
+    - date: date / release_date / published_date
     - category: category
     - doc_type: doc_type
     - title: title
-    - body: body_text / body
-    - link: url / link
+    - body: body
+    - link: link / url
     """
     tables: List[pd.DataFrame] = []
 
@@ -70,7 +76,10 @@ def merge_csvs_to_table(
             if col is None
         ]
         if missing:
-            raise ValueError(f"{path}에 필요한 컬럼이 없습니다: {missing}. 현재 컬럼: {list(df.columns)}")
+            raise ValueError(
+                f"{path} is missing required columns: {missing}. "
+                f"Available columns: {list(df.columns)}"
+            )
 
         out = pd.DataFrame(
             {
@@ -91,8 +100,6 @@ def merge_csvs_to_table(
     merged = merged[["date", "category", "doc_type", "title", "body", "link"]]
 
     if sort_by_date:
-        # date는 문자열일 수 있으므로 안전하게 datetime으로 변환해 정렬한다.
-        # 파싱 실패(NaT)는 맨 뒤로 보낸다.
         sort_key = pd.to_datetime(merged["date"], errors="coerce")
         merged = merged.assign(_sort_date=sort_key).sort_values(
             by=["_sort_date", "date"],
@@ -105,16 +112,117 @@ def merge_csvs_to_table(
     return merged
 
 
-if __name__ == "__main__":
-    # 예시 실행: 로컬에서 CSV 파일 경로를 직접 지정하세요.
+def one_hot_encode_category(
+    df: pd.DataFrame,
+    keep_category: bool = True,
+    prefix: str = "category",
+    dtype: str = "int64",
+) -> pd.DataFrame:
+    """
+    One-hot encode the `category` column from an existing DataFrame.
+    """
+    if "category" not in df.columns:
+        raise ValueError(
+            "`category` column was not found. "
+            f"Available columns: {list(df.columns)}"
+        )
+
+    encoded = pd.get_dummies(df["category"], prefix=prefix, dtype=dtype)
+
+    if keep_category:
+        return pd.concat([df, encoded], axis=1)
+
+    return pd.concat([df.drop(columns=["category"]), encoded], axis=1)
+
+
+def read_csv_and_one_hot_encode_category(
+    csv_path: str,
+    encoding: str = "utf-8-sig",
+    keep_category: bool = True,
+    prefix: str = "category",
+    dtype: str = "int64",
+) -> pd.DataFrame:
+    """
+    Read a CSV file and one-hot encode the `category` column.
+    """
+    df = pd.read_csv(csv_path, encoding=encoding)
+    return one_hot_encode_category(
+        df,
+        keep_category=keep_category,
+        prefix=prefix,
+        dtype=dtype,
+    )
+
+
+def add_cyclical_time_features(
+    df: pd.DataFrame,
+    date_col: str = DATE_COL,
+) -> pd.DataFrame:
+    """
+    Add calendar-based and cyclical time features derived from a date column.
+    """
+    if date_col not in df.columns:
+        raise ValueError(
+            f"`{date_col}` column was not found. "
+            f"Available columns: {list(df.columns)}"
+        )
+
+    out = df.copy()
+    out[date_col] = pd.to_datetime(out[date_col], errors="coerce")
+
+    out["day_of_week"] = out[date_col].dt.dayofweek
+    out["month"] = out[date_col].dt.month
+
+    out["day_of_week_sin"] = np.sin(2 * np.pi * out["day_of_week"] / 7)
+    out["day_of_week_cos"] = np.cos(2 * np.pi * out["day_of_week"] / 7)
+
+    out["month_sin"] = np.sin(2 * np.pi * out["month"] / 12)
+    out["month_cos"] = np.cos(2 * np.pi * out["month"] / 12)
+
+    out["is_weekend"] = (out["day_of_week"] >= 5).astype("Int64")
+    return out
+
+
+def read_csv_and_add_cyclical_time_features(
+    csv_path: str,
+    encoding: str = "utf-8-sig",
+    date_col: str = DATE_COL,
+) -> pd.DataFrame:
+    """
+    Read a CSV file and add cyclical time features from a date column.
+    """
+    df = pd.read_csv(csv_path, encoding=encoding)
+    return add_cyclical_time_features(df, date_col=date_col)
+
+
+def main() -> None:
     csv_paths = [
         "fed_fomc_links_summarized.csv",
         "whitehouse_qqq_policy_summarized.csv",
         "bis_press_releases.csv",
     ]
-    merged = merge_csvs_to_table(csv_paths)
-    print(merged.head(20))
-    print("[INFO] merged_rows=", len(merged))
-    merged.to_csv("merged_table_sorted.csv", index=False, encoding="utf-8-sig")
-    print("[INFO] saved=merged_table_sorted.csv")
 
+    merged = merge_csvs_to_table(csv_paths)
+    print("[INFO] merged_rows=", len(merged))
+    merged.to_csv(DEFAULT_MERGED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(f"[INFO] saved merged file: {DEFAULT_MERGED_OUTPUT_CSV}")
+
+    encoded = one_hot_encode_category(merged, keep_category=True)
+    encoded.to_csv(DEFAULT_ENCODED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(f"[INFO] saved encoded file: {DEFAULT_ENCODED_OUTPUT_CSV}")
+
+    time_features = add_cyclical_time_features(encoded, date_col=DATE_COL)
+    time_features.to_csv(DEFAULT_TIME_FEATURES_OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(f"[INFO] saved time features file: {DEFAULT_TIME_FEATURES_OUTPUT_CSV}")
+
+    preview_cols = [
+        "date",
+        "day_of_week", "day_of_week_sin", "day_of_week_cos",
+        "month", "month_sin", "month_cos",
+        "is_weekend",
+    ]
+    print(time_features[preview_cols].head(10))
+
+
+if __name__ == "__main__":
+    main()
