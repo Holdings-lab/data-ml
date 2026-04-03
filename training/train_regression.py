@@ -1,7 +1,7 @@
 """
 1. threshold 추가
 2. 거시경제 HYG, UUP 추가
-3. 
+3. 뉴스 감성 데이터 추가 (merged_finbert.csv)
 
 전체적인 흐름을 보고 급변하는 시기를 맞춰서 기간을 정해야함.
 2000 ~ 2020 주가가 많이 오르지 않았기 때문에 2020~ 2025 퀀텀점프 예측은 힘들다
@@ -341,111 +341,19 @@ feature_cols = [
     
 ]
 
-"""
-# [디버깅] dropna 하기 직전에 실행하세요
-print("\n" + "="*50)
-print("🔎 결측치(NaN) 점검 리포트")
-print(f"전체 행 개수: {len(df)}")
-print("="*50)
-
-# 1. 컬럼별 NaN 개수 확인 (NaN이 하나라도 있는 것들만)
-nan_counts = df.isnull().sum()
-nan_cols = nan_counts[nan_counts > 0].sort_values(ascending=False)
-
-if not nan_cols.empty:
-    print("\n[NaN 발생 컬럼 목록]")
-    for col, count in nan_cols.items():
-        print(f"{col}: {count}개 (비율: {count/len(df)*100:.1f}%)")
-else:
-    print("\n✅ 모든 컬럼이 깨끗합니다 (NaN 없음).")
-
-# 2. 모든 행을 지워버리는 주범(100% NaN) 찾기
-deadly_cols = nan_counts[nan_counts >= len(df)].index.tolist()
-if deadly_cols:
-    print(f"\n❌ 위험: 아래 컬럼들이 모든 데이터를 삭제하고 있습니다:")
-    print(deadly_cols)
-    print("\n💡 해결책: 위 컬럼의 계산식을 확인하거나, 해당 티커 데이터가 잘 다운로드됐는지 확인하세요.")
-else:
-    print("\n✅ 데이터 전체를 삭제하는 '독성 컬럼'은 없습니다.")
-
-print("="*50 + "\n")
-"""
-
-
-best_overall_acc = 0
-best_horizon = None
-best_features = []
-
-print("=== 🔍 [통합 최적화] 최적의 조합 탐색 시작 ===")
-
-for h in range(5,6):
-    # 1. 해당 Horizon용 데이터 세팅 (타겟 생성 등)
-    df_h = df.copy()
-    df_h["target_logret"] = np.log(df_h["target_price"].shift(-h) / df_h["target_price"])*100
-    df_h = df_h.dropna().copy()
-    
-    # 2. 피처/타겟 분리
-    X_full = df_h[feature_cols]
-    y_full = df_h["target_logret"]
-    split = int(len(df_h) * 0.8)
-    X_train_full = X_full.iloc[:split]
-    y_train_full = y_full.iloc[:split]
-
-    # -----------------------------------------------------
-    # Step A: 이 Horizon에서 가장 중요한 피처 25개 뽑기
-    # -----------------------------------------------------
-    selector = XGBRegressor(n_estimators=100, max_depth=3, random_state=42)
-    selector.fit(X_train_full, y_train_full)
-    
-    # 중요도 순으로 상위 25개 피처 추출
-    importances = pd.Series(selector.feature_importances_, index=feature_cols)
-    current_top_25 = importances.sort_values(ascending=False).head(15).index.tolist()
-
-    # -----------------------------------------------------
-    # Step B: 뽑힌 25개 피처로만 교차 검증 (실력 테스트)
-    # -----------------------------------------------------
-    tscv = TimeSeriesSplit(n_splits=3)
-    cv_accs = []
-    
-    for tr_idx, va_idx in tscv.split(X_train_full):
-        tr_idx_purged = tr_idx[:-h] if len(tr_idx) > h else tr_idx
-        
-        X_tr, X_va = X_train_full[current_top_25].iloc[tr_idx_purged], X_train_full[current_top_25].iloc[va_idx]
-        y_tr, y_va = y_train_full.iloc[tr_idx_purged], y_train_full.iloc[va_idx]
-        
-        m = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.005, random_state=42)
-        m.fit(X_tr, y_tr)
-        
-        # 방향성 정확도 측정
-        acc = accuracy_score((y_va > 0).astype(int), (m.predict(X_va) > 0).astype(int))
-        cv_accs.append(acc)
-    
-    avg_acc = np.mean(cv_accs)
-
-    # -----------------------------------------------------
-    # Step C: 전체 Horizon 중 최고 성적 업데이트
-    # -----------------------------------------------------
-    if avg_acc > best_overall_acc:
-        best_overall_acc = avg_acc
-        best_horizon = h
-        best_features = current_top_25 # 최고 성적일 때의 피처 20개를 저장
-
-# =========================================================
-# 🏆 최종 결과 발표
-# =========================================================
-print("\n" + "="*50)
-print(f"🎉 최적의 Horizon 발견: {best_horizon}일")
-print(f"📈 최고 예측 정확도: {best_overall_acc*100:.2f}%")
-print(f"🛠 선택된 정예 피처 40개: \n{best_features}")
-print("="*50)
-
-horizon = int(best_horizon) #타겟 날짜
+horizon = 5                      # 예측 기간 고정 (5일)
+best_horizon = horizon
+best_features = feature_cols     # feature_cols 그대로 사용
+ 
+print(f"✅ Horizon: {horizon}일 고정")
+ 
+# horizon = 5 (위에서 고정됨)
 df["target_logret_2d"] = np.log(price.shift(-horizon) / price) *100
 df["target_future_price"] = price.shift(-horizon)
 df["target_date"] = df["Date"].shift(-horizon)
-
+ 
 df = df.dropna().copy()
-
+ 
 X = df[best_features]
 y = df["target_logret_2d"]
 
@@ -464,6 +372,7 @@ test_future_price = df.iloc[split:]["target_future_price"].values
 test_target_date = pd.to_datetime(df.iloc[split:]["target_date"].values)
 test_current_date = pd.to_datetime(df.iloc[split:]["Date"].values)
 
+
 # =========================================================
 # 11. walk-forward CV로 n_estimators 선택
 # =========================================================
@@ -473,7 +382,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 def objective(trial):
     param = {
         "n_estimators": trial.suggest_int("n_estimators", 100, 500),
-        "max_depth": trial.suggest_int("max_depth", 4, 6), # 조금 더 깊게 탐색 허용 10일 예측시 (3,8) 20일 예측시 (5,8)
+        "max_depth": trial.suggest_int("max_depth", 4, 6), 
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
         "subsample": trial.suggest_float("subsample", 0.5, 0.9),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.9),
@@ -524,7 +433,7 @@ def objective(trial):
             목표: "틀려서 감점당하는 게 제일 무서워! 실제 가격이랑 최대한 비슷하게 대답할래."
             정확도(Acc): 낮아질 가능성이 큽니다. 방향을 맞추는 것보다 실제 가격과의 '거리'를 좁히는 데 에너지를 다 쓰기 때문입니다.
             그래프: 실제 가격에 찰떡처럼 달라붙습니다. 오차를 줄여야 점수를 받으므로, 모델이 실제 주가의 출렁임을 필사적으로 흉내 냅니다."""
-        score = acc - (rmse * 0.01) 
+        score = acc - (rmse * 0.1) 
         
         combined_scores.append(score)
     
@@ -608,7 +517,7 @@ print(result_df.head(15))
 # --- [하락/상승 예측 정밀 검증 로직] ---
 
 # 1. 확신도 상위 20% 지점 계산 (절대값 기준)
-conf_cutoff = result_df['Pred_LogRet'].abs().quantile(0.8)
+conf_cutoff = result_df['Pred_LogRet'].abs().quantile(0.7)
 high_conf_df = result_df[result_df['Pred_LogRet'].abs() >= conf_cutoff].copy()
 
 # 2. 고확신 구간 내에서 '상승 예측'과 '하락 예측' 분리
@@ -621,13 +530,14 @@ long_acc = (long_preds['Actual_Future_Price'] > long_preds['Current_Price']).mea
 short_acc = (short_preds['Actual_Future_Price'] < short_preds['Current_Price']).mean() if len(short_preds) > 0 else 0
 
 print("\n" + "="*50)
-print(f"🎯 [고확신 상위 20% 구간] 정밀 분석 리포트")
+print(f"🎯 [고확신 상위 30% 구간] 정밀 분석 리포트")
 print(f"기준 문턱값(LogRet 절대값): {conf_cutoff:.4f}")
 print("-" * 50)
 print(f"1. 상승(Long) 확신 시 정확도: {long_acc*100:.2f}% (샘플 수: {len(long_preds)}개)")
 print(f"2. 하락(Short) 확신 시 정확도: {short_acc*100:.2f}% (샘플 수: {len(short_preds)}개)")
 print("="*50)
 
+"""
 # 4. 해석 가이드
 if short_acc > 0.5:
     print("💡 분석 결과: 모델이 하락할 때를 꽤 잘 맞춥니다! '천재형' 모델에 가깝습니다.")
@@ -635,6 +545,7 @@ elif len(short_preds) == 0:
     print("⚠️ 분석 결과: 모델이 하락을 아예 예측하지 않습니다. 상승장 편향이 심합니다.")
 else:
     print("📉 분석 결과: 하락 예측은 잘 못 맞춥니다. 상승장에만 강한 모델입니다.")
+"""
 
 # 한글 깨짐 방지 (필요시)
 plt.rcParams['font.family'] = 'Malgun Gothic'
