@@ -341,7 +341,7 @@ feature_cols = [
     
 ]
 
-horizon = 5                      # 예측 기간 고정 (5일)
+horizon = 15                      # 예측 기간 고정 (5일)
 best_horizon = horizon
 best_features = feature_cols     # feature_cols 그대로 사용
  
