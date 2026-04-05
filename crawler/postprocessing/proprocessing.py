@@ -24,6 +24,10 @@ BODY_COL = "body"
 BODY_LENGTH_COL = "body_original_length"
 
 
+def _existing_csv_paths(csv_paths: Iterable[str]) -> list[str]:
+    return [path for path in csv_paths if Path(path).exists()]
+
+
 def _pick_first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
     for c in candidates:
         if c in df.columns:
@@ -210,11 +214,18 @@ def read_csv_and_add_cyclical_time_features(
 
 
 def main() -> None:
-    csv_paths = [
+    csv_candidates = [
         summarized_csv_path("fed_fomc_links_summarized.csv"),
-        summarized_csv_path("whitehouse_qqq_policy_summarized.csv"),
+        summarized_csv_path("ucsb_presidential_documents_summarized.csv"),
         summarized_csv_path("bis_press_releases_summarized.csv"),
     ]
+    csv_paths = _existing_csv_paths(csv_candidates)
+
+    if not csv_paths:
+        raise FileNotFoundError(
+            "No summarized crawler outputs were found. "
+            f"Checked: {csv_candidates}"
+        )
 
     merged = merge_csvs_to_table(csv_paths)
     print("[INFO] merged_rows=", len(merged))

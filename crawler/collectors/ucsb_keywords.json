@@ -1,0 +1,48 @@
+{
+  "group_a_direct_qqq_index": [
+    "QQQ",
+    "Invesco QQQ",
+    "Nasdaq-100",
+    "Nasdaq 100",
+    "NDX"
+  ],
+  "group_b_big_tech_holdings": [
+    "Apple",
+    "Microsoft",
+    "Nvidia",
+    "Amazon",
+    "Meta",
+    "Alphabet",
+    "Tesla",
+    "Broadcom"
+  ],
+  "group_c_core_industries": [
+    "semiconductor",
+    "chip",
+    "AI",
+    "cloud",
+    "software",
+    "datacenter",
+    "advanced computing"
+  ],
+  "group_d_macro_variables": [
+    "inflation",
+    "interest rates",
+    "labor market",
+    "liquidity",
+    "financial conditions",
+    "yields",
+    "recession",
+    "growth outlook"
+  ],
+  "group_e_policy_regulation": [
+    "export controls",
+    "tariffs",
+    "sanctions",
+    "antitrust",
+    "tax credits",
+    "industrial policy",
+    "regulation",
+    "restrictions"
+  ]
+}
