@@ -259,6 +259,10 @@ news_df['date'] = news_df['date'] + pd.to_timedelta(
 
 # 4. 같은 날짜(하루)에 나온 뉴스들을 평균내기 (하루 1개의 행으로 압축)
 daily_news = news_df.groupby('date').mean().reset_index()
+# 같은 날짜에 뉴스가 여러 건 있을 수 있으므로, 평균 감성값 외에도
+# "그날 뉴스가 몇 건 있었는지"를 별도 feature로 남긴다.
+# 뉴스 개수는 이벤트 강도나 시장 관심도를 보여줄 수 있다.
+daily_news["news_count"] = news_df.groupby("date").size().to_numpy()
 
 # 5. 기존 주가 DataFrame(df)과 병합하기
 # yfinance에서 받아온 Date 컬럼의 타임존(timezone)을 제거해야 병합 시 에러가 나지 않습니다.
@@ -267,18 +271,43 @@ df = pd.merge(df, daily_news, left_on='Date', right_on='date', how='left')
 
 # 6. 뉴스가 없는 날(NaN) 결측치 처리
 # 뉴스가 없는 날은 중립(neutral) 1.0, 긍정/부정 및 점수는 0으로 세팅
+# 여기서는 뉴스가 없는 날의 결측치를 ffill 하지 않는다.
+# 이유는 이전 뉴스 감성을 오늘까지 그대로 끌고 오면
+# "뉴스 없음"과 "예전 뉴스의 잔존 영향"이 섞여 왜곡될 수 있기 때문이다.
+# 따라서 뉴스가 없으면 기본적으로 중립(1.0)과 무신호(0.0)로 해석한다.
 df['title_neutral_prob'] = df['title_neutral_prob'].fillna(1.0)
 df['body_neutral_prob'] = df['body_neutral_prob'].fillna(1.0)
 
 sentiment_fill_zero_cols =[
+    'news_count',
     'title_positive_prob', 'title_negative_prob', 'title_sentiment_score',
     'body_positive_prob', 'body_negative_prob', 'body_sentiment_score',
     'category_BIS', 'category_FOMC', 'category_White House', 'body_n_chunks'
 ]
-df[sentiment_fill_zero_cols] = df[sentiment_fill_zero_cols].fillna(method='ffill').fillna(0.0)
+df[sentiment_fill_zero_cols] = df[sentiment_fill_zero_cols].fillna(0.0)
 
 # 7. 요일/월 변환 등 나머지 변수들은 이전 영업일 값을 가져오거나 0으로 채움
-df.fillna(method='ffill', inplace=True) 
+# 달력 계열 변수는 뉴스 원본 컬럼을 그대로 믿지 않고,
+# 실제 시장 거래 날짜(Date)로부터 다시 계산한다.
+# 이렇게 해야 뉴스가 없는 날에도 요일/월 정보가 정확하게 유지된다.
+df['day_of_week_sin'] = np.sin(2 * np.pi * df['Date'].dt.dayofweek / 7)
+df['day_of_week_cos'] = np.cos(2 * np.pi * df['Date'].dt.dayofweek / 7)
+df['month_sin'] = np.sin(2 * np.pi * df['Date'].dt.month / 12)
+df['month_cos'] = np.cos(2 * np.pi * df['Date'].dt.month / 12)
+df['is_weekend'] = df['Date'].dt.dayofweek.isin([5, 6]).astype(float)
+
+# 뉴스의 지속효과는 이전 감성값을 그대로 전파하는 대신,
+# 마지막 뉴스 이후 경과 일수로 분리해서 전달한다.
+# 모델이 최근 뉴스와 오래된 뉴스를 구분해서 학습하도록 돕기 위한 장치다.
+last_news_date = df['Date'].where(df['news_count'] > 0).ffill()
+df['days_since_news'] = (
+    (df['Date'] - last_news_date).dt.days.clip(upper=30).fillna(30).astype(float)
+)
+# has_news는 당일 뉴스 존재 여부, news_count_lag1은 전 영업일 뉴스량이다.
+# 감성의 방향뿐 아니라 뉴스 이벤트의 빈도와 리듬도 같이 학습시키려는 목적이다.
+df['has_news'] = (df['news_count'] > 0).astype(float)
+df['news_count_lag1'] = df['news_count'].shift(1).fillna(0.0)
+
 df.fillna(0, inplace=True)
 
 # =========================================================
@@ -303,6 +332,9 @@ df.fillna(0, inplace=True) # 새로 생긴 결측치 제거
 df['sentiment_gap'] = df['title_positive_prob'] - df['title_negative_prob']
 df['body_sentiment_gap'] = df['body_positive_prob'] - df['body_negative_prob']
 df['sentiment_shock'] = df['sentiment_gap'] - df['sentiment_gap'].rolling(5).mean()
+# 시간이 지난 뉴스는 영향력이 줄어든다고 가정하고 반감기 3일 감쇠를 준다.
+# 같은 감성 점수라도 "오늘 나온 뉴스"와 "며칠 지난 뉴스"를 다르게 보려는 실험용 feature다.
+df['body_sentiment_decay_3d'] = df['body_sentiment_score'] * (0.5 ** (df['days_since_news'] / 3.0))
 
 # --- [정예 피처 2: 가격 가속도 및 변동성 폭발] ---
 # 단순 수익률 대신 상승세가 붙었는지(가속도), 변동성이 갑자기 터졌는지 확인
@@ -327,7 +359,13 @@ feature_cols = [
     #다른 feature 따로 저장
 
     # 핵심 감성 (Shock 위주)
-    "sentiment_gap", "body_sentiment_gap", "sentiment_shock", "body_sentiment_score",
+    # news_count: 당일 뉴스량
+    # days_since_news: 마지막 뉴스 이후 경과 일수
+    # sentiment_gap / body_sentiment_gap: 긍정과 부정의 순격차
+    # sentiment_shock: 최근 평균 대비 감성 변화량
+    # body_sentiment_decay_3d: 오래된 뉴스의 영향력을 줄인 감성 점수
+    "news_count", "days_since_news", "sentiment_gap", "body_sentiment_gap",
+    "sentiment_shock", "body_sentiment_score", "body_sentiment_decay_3d",
     
     # 가격 동력 (Momentum & Accel)
     "ret_5", "ret_accel", "dist_to_ma5", "bb_pos", "rsi_14",
