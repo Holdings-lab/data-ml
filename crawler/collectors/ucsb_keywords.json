@@ -19,7 +19,6 @@
   "group_c_core_industries": [
     "semiconductor",
     "chip",
-    "AI",
     "cloud",
     "software",
     "datacenter",
@@ -37,7 +36,6 @@
   ],
   "group_e_policy_regulation": [
     "export controls",
-    "tariffs",
     "sanctions",
     "antitrust",
     "tax credits",
