@@ -50,13 +50,13 @@ def csv_path(filename: str) -> str:
     """
     collected_files = {
         "fed_fomc_links.csv",
-        "whitehouse_qqq_policy.csv",
         "bis_press_releases.csv",
+        "ucsb_presidential_documents.csv",
     }
     summarized_files = {
         "fed_fomc_links_summarized.csv",
-        "whitehouse_qqq_policy_summarized.csv",
         "bis_press_releases_summarized.csv",
+        "ucsb_presidential_documents_summarized.csv",
     }
     feature_files = {
         "merged_table_sorted.csv",
