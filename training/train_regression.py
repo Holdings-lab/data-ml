@@ -234,7 +234,7 @@ print("뉴스 데이터(merged_finbert.csv) 로드 및 병합 중...")
 
 # 현재 파일(train_regression.py) 위치 기준으로 상위 폴더의 data/merged_finbert.csv 경로 찾기
 current_dir = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(current_dir, "..", "data", "merged_finbert.csv")
+csv_path = os.path.join("C:\\Users\\admin\\data-ml\\data\\crawler\\features\\merged_finbert.csv")
 
 # 1. 뉴스 데이터 불러오기
 news_df = pd.read_csv(csv_path)

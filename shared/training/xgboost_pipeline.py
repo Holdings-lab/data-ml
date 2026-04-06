@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import optuna
 import pandas as pd
+from sklearn.base import is_classifier, is_regressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
@@ -407,6 +408,25 @@ def _to_serializable_config(config: MarketNewsTrainingConfig) -> dict:
     }
 
 
+def _save_xgboost_model_with_estimator_type(
+    model: XGBRegressor,
+    output_path: Path,
+) -> None:
+    """
+    Save XGBoost sklearn wrappers with a compatibility fallback for recent
+    sklearn/xgboost combinations that omit `_estimator_type` on the instance.
+    """
+    if not hasattr(model, "_estimator_type"):
+        if is_regressor(model):
+            model._estimator_type = "regressor"
+        elif is_classifier(model):
+            model._estimator_type = "classifier"
+        else:
+            raise TypeError("Could not determine estimator type before saving XGBoost model.")
+
+    model.save_model(str(output_path))
+
+
 def _fit_and_evaluate_supervised_experiment(
     experiment_name: str,
     supervised_frame: pd.DataFrame,
@@ -553,7 +573,7 @@ def run_training_experiment(
         if predictions_output_path is not None:
             predictions.to_csv(predictions_output_path, index=False, encoding="utf-8-sig")
         if model_output_path is not None:
-            final_model.save_model(str(model_output_path))
+            _save_xgboost_model_with_estimator_type(final_model, model_output_path)
         if metadata_output_path is not None:
             write_json(metadata, metadata_output_path)
 
