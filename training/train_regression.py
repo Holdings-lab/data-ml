@@ -43,7 +43,7 @@ tickers = [target, "SPY", "^VIX", "TLT", "HYG", "UUP"]
 
 raw = yf.download(
     tickers=tickers,
-    start="2015-01-01",
+    start="2019-03-20",
     end="2026-03-01",
     auto_adjust=True, #주가 조정 (배당금, 액면분할 등) 반영된 가격 사용/ if, False면 조정 안된 가격 사용
     progress=False
@@ -242,7 +242,7 @@ news_df['date'] = pd.to_datetime(news_df['date']).dt.tz_localize(None)
 
 # 2. 사용할 Feature 컬럼만 선택
 news_cols =[
-    'date', 'category_BIS', 'category_FOMC', 'category_White House',
+    'date', 'category_BIS', 'category_FOMC', 'category_UCSB',
     'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos', 'is_weekend',
     'title_positive_prob', 'title_negative_prob', 'title_neutral_prob', 'title_sentiment_score',
     'body_positive_prob', 'body_negative_prob', 'body_neutral_prob', 'body_sentiment_score',
@@ -282,7 +282,7 @@ sentiment_fill_zero_cols =[
     'news_count',
     'title_positive_prob', 'title_negative_prob', 'title_sentiment_score',
     'body_positive_prob', 'body_negative_prob', 'body_sentiment_score',
-    'category_BIS', 'category_FOMC', 'category_White House', 'body_n_chunks'
+    'category_BIS', 'category_FOMC', 'category_UCSB', 'body_n_chunks'
 ]
 df[sentiment_fill_zero_cols] = df[sentiment_fill_zero_cols].fillna(0.0)
 
@@ -379,7 +379,7 @@ feature_cols = [
     
 ]
 
-horizon = 15                      # 예측 기간 고정 (5일)
+horizon = 5                      # 예측 기간 고정 (5일)
 best_horizon = horizon
 best_features = feature_cols     # feature_cols 그대로 사용
  
@@ -549,8 +549,22 @@ result_df = pd.DataFrame({
     "Pred_LogRet": pred_logret,
 })
 
+# Prediction Sample로 화면에 보여주는 예측 결과를 CSV로도 저장한다.
+# 실험 스크립트 결과물이므로 shared 파이프라인 산출물과 섞이지 않게
+# train_regression 전용 폴더에 따로 모아둔다.
+prediction_output_dir = os.path.abspath(
+    os.path.join(current_dir, "..", "training", "train_regression")
+)
+os.makedirs(prediction_output_dir, exist_ok=True)
+
+prediction_output_path = os.path.join(
+    prediction_output_dir,
+    f"{target.lower()}_train_regression_predictions.csv"
+)
+result_df.to_csv(prediction_output_path, index=False, encoding="utf-8-sig")
+
 print("\nPrediction Sample:")
-print(result_df.head(15))
+print(f"Prediction CSV saved to: {prediction_output_path}")
 
 # --- [하락/상승 예측 정밀 검증 로직] ---
 

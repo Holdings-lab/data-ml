@@ -18,7 +18,7 @@ SENTIMENT_FILL_ZERO_COLUMNS = [
     "body_sentiment_score",
     "category_BIS",
     "category_FOMC",
-    "category_White House",
+    "category_UCSB",
     "body_n_chunks",
 ]
 

@@ -32,14 +32,14 @@
   "test_start_date": "2023-10-02",
   "test_end_date": "2025-12-09",
   "metrics": {
-    "mae": 15.978602051202156,
-    "rmse": 20.764522309204693,
-    "r2_score": 0.9093671854225552,
-    "direction_accuracy": 0.6272727272727273,
-    "mape": 3.34394527412203,
-    "baseline_mae": 17.07117958762429,
-    "baseline_rmse": 21.543077782494798,
-    "baseline_mape": 3.546048312260485
+    "mae": 15.500081630196302,
+    "rmse": 20.380359093273338,
+    "r2_score": 0.9126897522449406,
+    "direction_accuracy": 0.7181818181818181,
+    "mape": 3.249039627612862,
+    "baseline_mae": 17.071180530894885,
+    "baseline_rmse": 21.543078890857146,
+    "baseline_mape": 3.546048544872557
   },
   "config": {
     "target_ticker": "QQQ",
