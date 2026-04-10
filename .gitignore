@@ -4,5 +4,6 @@ venv/
 env/
 
 *.csv
+!data/crawler/features/*.csv
 **/__pycache__/
 *.py[cod]

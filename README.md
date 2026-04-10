@@ -384,7 +384,7 @@ python shared/run_market_news_training.py \
 - 주요 입력 컬럼은 아래와 같은 `train_regression.py` 스타일 컬럼
   - `category_BIS`
   - `category_FOMC`
-  - `category_White House`
+  - `category_UCSB`
   - `day_of_week_sin`, `day_of_week_cos`
   - `month_sin`, `month_cos`
   - `is_weekend`
@@ -398,36 +398,40 @@ python shared/run_market_news_training.py \
 
 ### 4. 뉴스 병합과 결측 처리 순서도 최대한 그대로 맞춤
 
-`shared/news/merge.py`는 지금 `train_regression.py`의 병합 흐름을 거의 그대로 따름.
+`shared/news/merge.py`는 `train_regression.py`의 병합 흐름을 따름.
 
 현재 순서:
 
 1. 시장 데이터와 뉴스 일자 테이블을 날짜 기준 `left join`
-2. `title_neutral_prob`, `body_neutral_prob`는 기본값 `1.0`
-3. 주요 뉴스/감성 컬럼은 `ffill()` 후 `0.0`
-4. 그 다음 전체 프레임도 다시 `ffill()` 후 `0.0`
+2. `title_neutral_prob`, `body_neutral_prob`는 기본값 `1.0`으로 채움
+3. 주요 뉴스/감성 컬럼은 **`ffill` 없이 `0.0`으로 채움** (뉴스 없는 날 = 무신호)
+4. `days_since_news` 계산: 마지막 뉴스 이후 경과 거래일 수 (최대 30일)
+5. 전체 프레임 `ffill()` + `0.0` (시장 피처용, 뉴스 컬럼은 이미 채워진 상태)
 
-이건 사실상 `train_regression.py`의 아래 의도를 그대로 가져온 것임.
+`ffill`을 쓰지 않는 이유:
 
-- 뉴스가 없는 날은 중립값으로 둠
-- 뉴스 관련 값은 직전 값 흐름을 어느 정도 이어받게 함
-- 그래도 처음 구간은 `0`으로 마감
+- `ffill`을 쓰면 며칠 전 뉴스 감성이 아무 뉴스도 없는 날까지 그대로 전파됨
+- "뉴스 없음(0)"과 "예전 뉴스의 잔존 영향"이 섞여 신호가 왜곡될 수 있음
+- 대신 `days_since_news`와 `body_sentiment_decay_3d`를 통해 오래된 뉴스의 감쇠된 영향을 모델이 별도로 학습하게 함
 
-### 5. 뉴스 파생 피처도 원본 스크립트의 핵심 4개를 그대로 씀
+### 5. 뉴스 파생 피처는 원본 스크립트 기준 핵심 6개
 
-현재 메인 `market_news` 실험에서 쓰는 뉴스 피처는 아래 4개임.
+현재 메인 `market_news` 실험에서 쓰는 뉴스 피처는 아래 6개임.
 
-- `sentiment_gap`
-- `body_sentiment_gap`
-- `sentiment_shock`
-- `body_sentiment_score`
+| 피처 | 설명 |
+| --- | --- |
+| `sentiment_gap` | 제목 긍정 확률 - 부정 확률 |
+| `body_sentiment_gap` | 본문 긍정 확률 - 부정 확률 |
+| `sentiment_shock` | `sentiment_gap`의 최근 5일 평균 대비 변화량 |
+| `body_sentiment_score` | 본문 감성 점수 자체 |
+| `days_since_news` | 마지막 뉴스 이후 경과 거래일 수 (최대 30) |
+| `body_sentiment_decay_3d` | `body_sentiment_score × 0.5^(days_since_news / 3)` — 반감기 3일 감쇠 적용 |
 
-즉 원본의 아래 아이디어를 그대로 따라간 것.
+`days_since_news`와 `body_sentiment_decay_3d`를 추가한 이유:
 
-- 제목 긍정/부정 차이
-- 본문 긍정/부정 차이
-- 최근 평균 대비 감성 충격
-- 본문 감성 점수 자체
+- 뉴스가 없는 날 감성값을 `0`으로 채우면 "오늘 뉴스가 있어서 0점"과 "뉴스 자체가 없어서 0점"을 구분 못 함
+- `days_since_news`로 경과 일수를 직접 제공하면 모델이 "최근 뉴스"와 "며칠 지난 뉴스"를 구분해서 학습 가능
+- `body_sentiment_decay_3d`는 같은 감성 점수라도 오래된 뉴스일수록 영향력이 작아지도록 반감기 감쇠를 적용한 것
 
 추가로 `shared`에서는 aligned comparison 시작일 계산을 위해 `news_count_lag1` 보조 컬럼도 남겨 둠.
 이 컬럼은 메인 뉴스 피처라기보다 비교 구간을 자르는 데 쓰는 운영용 컬럼이라고 보면 됨.

@@ -31,7 +31,7 @@ from crawler.support_legacy.data_paths import collected_csv_path
 
 
 BASE_URL = "https://www.bis.gov"
-START_URL = "https://www.bis.gov/news-updates"
+START_URL = f"{BASE_URL}/news-updates"
 
 HEADLESS = True
 WAIT_SEC = 15
@@ -141,8 +141,6 @@ def extract_card_links_from_page(driver: webdriver.Chrome) -> List[Dict]:
         title_tag = a_tag.find("h3")
         if title_tag:
             title = clean_text(title_tag.get_text(" ", strip=True))
-        else:
-            title = clean_text(a_tag.get_text(" ", strip=True))
 
         if not title:
             continue

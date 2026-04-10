@@ -66,6 +66,8 @@ REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = [
     "body_sentiment_gap",
     "sentiment_shock",
     "body_sentiment_score",
+    "days_since_news",
+    "body_sentiment_decay_3d",
 ]
 
 

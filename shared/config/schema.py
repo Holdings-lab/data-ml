@@ -56,7 +56,7 @@ class DailyNewsFeatureRow(TypedDict, total=False):
     news_body_sentiment_max: float
     fomc_news_count: int
     bis_news_count: int
-    white_house_news_count: int
+    ucsb_news_count: int
 
 
 @dataclass(frozen=True)

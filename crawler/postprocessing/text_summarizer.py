@@ -1,12 +1,20 @@
 import os
-import time
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
 import requests
+
+try:
+    from transformers import AutoTokenizer
+except ImportError as exc:
+    raise ImportError(
+        "transformers가 현재 환경에 설치되어 있지 않습니다. "
+        "text_summarizer.py는 tokenizer 기반 청크 분할을 위해 transformers가 필요합니다."
+    ) from exc
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
@@ -17,25 +25,28 @@ if PROJECT_ROOT_STR not in sys.path:
 from crawler.support_legacy.data_paths import collected_csv_path, summarized_csv_path
 
 
-INPUT_CSV = collected_csv_path("bis_press_releases.csv")
-OUTPUT_CSV = summarized_csv_path("bis_press_releases_summarized.csv")
+INPUT_CSV = collected_csv_path("fed_fomc_links.csv")
+OUTPUT_CSV = summarized_csv_path("fed_fomc_links_summarized.csv")
 BODY_COL = "body"
 ORIGINAL_LENGTH_COL = "body_original_length"
 MAX_CHARS = 10_000
 SLEEP_BETWEEN_CALLS_SEC = 0.5
 
-# Ollama (로컬) 설정: 환경변수로 바꿀 수 있게 해둠
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+# Ollama 설정은 코드에 고정한다.
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "llama3"
+
+# 청크 분할에 사용할 tokenizer와 token 기준 설정도 코드에 고정한다.
+TOKENIZER_NAME = "hf-internal-testing/llama-tokenizer"
+CHUNK_TOKENS = 2000
+CHUNK_OVERLAP_TOKENS = 200
+SLEEP_BETWEEN_CHUNK_CALLS_SEC = 0.5
+
+LOG_FILE = os.path.join(os.path.dirname(__file__), "ollama_calls.log")
+VERBOSE_LOG = False
 
 OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
-
-LOG_FILE = os.getenv(
-    "OLLAMA_LOG_FILE",
-    os.path.join(os.path.dirname(__file__), "ollama_calls.log"),
-)
-VERBOSE_LOG = os.getenv("OLLAMA_VERBOSE_LOG", "0").strip() in {"1", "true", "True", "YES", "yes"}
 
 
 def _log(msg: str) -> None:
@@ -46,18 +57,14 @@ def _log(msg: str) -> None:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
-        # 로그 파일 기록 실패는 요약 실행에 영향을 주지 않음
         pass
 
 
 def _check_ollama() -> None:
-    """
-    Ollama가 실제로 떠 있는지 최소한의 endpoint로 확인한다.
-    """
+    """Ollama 서버에 연결 가능한지 확인한다."""
     try:
         resp = requests.get(OLLAMA_TAGS_URL, timeout=10)
         _log(f"[OLLAMA] /api/tags status={resp.status_code}")
-        # json 파싱 실패해도 상태코드만은 의미가 있으므로 따로 처리
         try:
             data = resp.json()
             if isinstance(data, dict):
@@ -68,13 +75,6 @@ def _check_ollama() -> None:
     except Exception as e:
         _log(f"[OLLAMA][ERROR] cannot reach Ollama: {e}")
         raise
-
-# 긴 본문이 한 번에 들어가면 요청이 실패할 수 있어 chunk로 나눠 호출한다.
-CHUNK_CHARS = int(os.getenv("CHUNK_CHARS", "3500"))
-CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "200"))
-SLEEP_BETWEEN_CHUNK_CALLS_SEC = float(
-    os.getenv("SLEEP_BETWEEN_CHUNK_CALLS_SEC", str(SLEEP_BETWEEN_CALLS_SEC))
-)
 
 
 def _ollama_generate(payload: Dict[str, Any], timeout_sec: int = 180) -> str:
@@ -97,7 +97,6 @@ def _ollama_generate(payload: Dict[str, Any], timeout_sec: int = 180) -> str:
         _log(f"[OLLAMA][ERROR] json_parse_failed: {e} resp_preview={preview!r}")
         raise
 
-    # Ollama는 보통 {"response": "...", "done": true, ...} 형태로 옴
     response_text = (data.get("response") or "").strip()
     if VERBOSE_LOG:
         preview = response_text[:500]
@@ -108,57 +107,95 @@ def _ollama_generate(payload: Dict[str, Any], timeout_sec: int = 180) -> str:
     return response_text
 
 
-def _chunk_text(text: str, chunk_chars: int, overlap_chars: int) -> List[str]:
-    """
-    문자를 기준으로 chunk를 자른다.
-    overlap을 둬서 청크 경계에서 의미가 끊기는 것을 완화한다.
-    """
-    if chunk_chars <= 0:
-        raise ValueError("chunk_chars는 0보다 커야 합니다.")
-    if overlap_chars < 0:
-        raise ValueError("overlap_chars는 0보다 작을 수 없습니다.")
+def _build_tokenizer() -> AutoTokenizer:
+    """청크 분할에 사용할 tokenizer를 준비한다."""
+    return AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
-    if overlap_chars >= chunk_chars:
-        overlap_chars = max(0, chunk_chars - 1)
+
+TOKENIZER = _build_tokenizer()
+TOKENIZER.model_max_length = 10**9
+
+
+def _encode_text(text: str) -> List[int]:
+    """텍스트를 special token 없이 token ID 목록으로 인코딩한다."""
+    return TOKENIZER.encode(text or "", add_special_tokens=False)
+
+
+def _decode_tokens(token_ids: List[int]) -> str:
+    """token ID 목록을 다시 텍스트로 복원한다."""
+    return TOKENIZER.decode(token_ids, skip_special_tokens=True).strip()
+
+
+def _chunk_text(text: str, chunk_tokens: int, overlap_tokens: int) -> List[str]:
+    """
+    문자 수가 아니라 tokenizer 기준 token 수로 텍스트를 chunk로 나눈다.
+    chunk 경계에서 문맥 손실이 줄어들도록 overlap을 유지한다.
+    """
+    if chunk_tokens <= 0:
+        raise ValueError("chunk_tokens must be greater than 0.")
+    if overlap_tokens < 0:
+        raise ValueError("overlap_tokens cannot be negative.")
+
+    if overlap_tokens >= chunk_tokens:
+        overlap_tokens = max(0, chunk_tokens - 1)
 
     text = text or ""
-    n = len(text)
-    if n <= chunk_chars:
+    token_ids = _encode_text(text)
+    n_tokens = len(token_ids)
+    if n_tokens <= chunk_tokens:
         return [text]
 
     chunks: List[str] = []
-    step = max(1, chunk_chars - overlap_chars)
-    start = 0
-    while start < n:
-        end = min(n, start + chunk_chars)
-        chunks.append(text[start:end])
-        if end >= n:
+    step = max(1, chunk_tokens - overlap_tokens)
+    start_idx = 0
+    while start_idx < n_tokens:
+        end_idx = min(n_tokens, start_idx + chunk_tokens)
+        chunk_text = _decode_tokens(token_ids[start_idx:end_idx])
+        if chunk_text:
+            chunks.append(chunk_text)
+        if end_idx >= n_tokens:
             break
-        start += step
+        start_idx += step
 
     return chunks
 
 
 def summarize_to_under_limit(text: str, limit_chars: int = MAX_CHARS) -> str:
     """
-    input text를 요약해서 limit_chars 이하로 만든다.
-    - 입력이 너무 길면 chunk로 나눠서 요청한다.
-    - 최종 출력이 길어지면 마지막에 안전하게 자른다.
+    입력 텍스트를 요약해 최종 결과가 문자 수 제한을 넘지 않도록 만든다.
+    긴 입력은 먼저 tokenizer 기준 token 수로 나눈 뒤 단계적으로 요약한다.
     """
     text = text or ""
     if not text.strip():
         return ""
 
-    # 입력 길이가 작으면 단일 호출
-    if len(text) <= CHUNK_CHARS:
+    input_tokens = len(_encode_text(text))
+    if input_tokens <= CHUNK_TOKENS:
         prompt = (
-            "다음 문서를 영어로 핵심 위주로 요약해. "
-            f"최종 결과는 '문자 수 {limit_chars}자 이하'가 되도록 작성해.\n\n"
-            "가능하면 다음을 포함해:\n"
-            "- 핵심 주장/결론\n"
-            "- 중요한 수치(있다면)\n"
-            "- 문서의 목적과 범위\n\n"
-            "요약 대상 문서:\n"
+            "You are a careful summarization assistant.\n\n"
+
+            "Summarize the following document in English.\n"
+            f"Maximum length: {limit_chars} characters (strict limit).\n\n"
+
+            "Requirements:\n"
+            "- Preserve only information that is explicitly stated in the document\n"
+            "- Start with the main action, decision, or claim in the document\n"
+            "- Include important names, actions, dates, and numbers if they are clearly stated\n"
+            "- Keep the summary fact-based and neutral\n\n"
+
+            "Rules:\n"
+            "- Do not add interpretation, classification, or commentary\n"
+            "- Do not infer policy stance, sentiment, intent, or implications unless explicitly stated\n"
+            "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+            "'Here is the combined summary', 'Note:', or any other meta commentary\n"
+            "- Do not mention that you are summarizing or combining text\n"
+            "- No bullet points\n"
+            "- No headings\n"
+            "- No quotation marks around the whole summary\n\n"
+
+            "Output only the summary text.\n\n"
+
+            "Document:\n"
             f"{text}"
         )
         summary = _ollama_generate(
@@ -168,28 +205,49 @@ def summarize_to_under_limit(text: str, limit_chars: int = MAX_CHARS) -> str:
                 "stream": False,
             }
         )
-        _log(f"[SUM] single_call input_len={len(text)} output_len={len(summary)}")
+        _log(f"[SUM] single_call input_len={len(text)} input_tokens={input_tokens} output_len={len(summary)}")
         return summary[:limit_chars].rstrip()
 
-    # 입력이 길면 chunk로 나눠 단계적으로 요약
-    chunks = _chunk_text(text, chunk_chars=CHUNK_CHARS, overlap_chars=CHUNK_OVERLAP_CHARS)
+    chunks = _chunk_text(text, chunk_tokens=CHUNK_TOKENS, overlap_tokens=CHUNK_OVERLAP_TOKENS)
     num_chunks = max(1, len(chunks))
-    _log(f"[SUM] chunked input_len={len(text)} num_chunks={num_chunks} chunk_chars={CHUNK_CHARS} overlap_chars={CHUNK_OVERLAP_CHARS}")
-    # 청크 요약 길이를 동적으로 낮춰서, 전체 요약이 지나치게 커지지 않게 한다.
-    chunk_summary_target = max(200, int(limit_chars / num_chunks * 1.2))
-    # 사용자가 환경변수로 더 강하게 제한하고 싶으면 상한을 걸어줄 수도 있게 한다.
-    chunk_summary_target = min(chunk_summary_target, 2500)
+    _log(
+        f"[SUM] chunked input_len={len(text)} input_tokens={input_tokens} "
+        f"num_chunks={num_chunks} chunk_tokens={CHUNK_TOKENS} overlap_tokens={CHUNK_OVERLAP_TOKENS}"
+    )
+
+    chunk_summary_target = int((limit_chars / num_chunks) * 0.8)
+    chunk_summary_target = max(300, chunk_summary_target)
+    chunk_summary_target = min(chunk_summary_target, 1200)
 
     chunk_summaries: List[str] = []
     for idx, chunk in enumerate(chunks, start=1):
         prompt = (
-            f"다음 텍스트 청크를 영어로 핵심 위주로 요약해. "
-            f"최종 결과는 '문자 수 {chunk_summary_target}자 이하'가 되도록 작성해.\n\n"
-            "가능하면 다음을 포함해:\n"
-            "- 핵심 주장/결론\n"
-            "- 중요한 수치(있다면)\n\n"
-            f"청크 {idx}/{num_chunks}:\n"
-            f"{chunk}"
+            "You are a careful summarization assistant.\n\n"
+
+            "Summarize the following text chunk in English.\n"
+            f"Maximum length: {chunk_summary_target} characters (strict limit).\n\n"
+
+            "This chunk is part of a larger source document.\n"
+            "Keep only information that is explicitly stated in this chunk and is important for the full document.\n\n"
+
+            "Requirements:\n"
+            "- Capture the key action, decision, claim, or event in this chunk\n"
+            "- Include important names, actions, dates, and numbers if clearly stated\n"
+            "- Keep the summary factual and neutral\n\n"
+
+            "Rules:\n"
+            "- Do not add interpretation, classification, commentary, or implications\n"
+            "- Do not infer policy stance, sentiment, or intent\n"
+            "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+            "'Here is the combined summary', 'Note:', or any meta explanation\n"
+            "- Do not mention that this is a chunk\n"
+            "- No repetition\n"
+            "- No bullet points\n"
+            "- No headings\n\n"
+
+            "Output only the summary text.\n\n"
+
+            f"Text:\n{chunk}"
         )
         summary = _ollama_generate(
             {
@@ -199,21 +257,41 @@ def summarize_to_under_limit(text: str, limit_chars: int = MAX_CHARS) -> str:
             }
         )
         chunk_summaries.append(summary[:chunk_summary_target].rstrip())
-        _log(f"[SUM] chunk {idx}/{num_chunks} chunk_len={len(chunk)} chunk_summary_len={len(summary)} target={chunk_summary_target}")
+        _log(
+            f"[SUM] chunk {idx}/{num_chunks} chunk_len={len(chunk)} "
+            f"chunk_tokens={len(_encode_text(chunk))} chunk_summary_len={len(summary)} "
+            f"target={chunk_summary_target}"
+        )
         if idx < num_chunks:
             time.sleep(SLEEP_BETWEEN_CHUNK_CALLS_SEC)
 
     combined = "\n\n".join(chunk_summaries).strip()
 
     final_prompt = (
-        "아래는 원문을 chunk로 나눠서 얻은 여러 청크 요약이야. "
-        f"이 내용을 종합해서 영어로 최종 요약을 작성해. "
-        f"최종 결과는 '문자 수 {limit_chars}자 이하'가 되도록 작성해.\n\n"
-        "가능하면 다음을 포함해:\n"
-        "- 핵심 주장/결론\n"
-        "- 중요한 수치(있다면)\n"
-        "- 문서의 목적과 범위\n\n"
-        "청크 요약 모음:\n"
+        "You are a careful summarization assistant.\n\n"
+
+        "The following text consists of partial summaries from one source document.\n"
+        "Write one final English summary of the source document.\n"
+        f"Maximum length: {limit_chars} characters (strict limit).\n\n"
+
+        "Requirements:\n"
+        "- Preserve only information supported by the partial summaries\n"
+        "- Start with the document's main action, decision, claim, or event\n"
+        "- Include important names, actions, dates, and numbers if clearly present\n"
+        "- Keep the summary factual, neutral, and concise\n"
+        "- Merge overlapping points without adding new interpretation\n\n"
+
+        "Rules:\n"
+        "- Do not add interpretation, classification, commentary, or implications\n"
+        "- Do not infer policy stance, sentiment, or intent\n"
+        "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+        "'Here is the combined summary', 'Note:', or any meta explanation\n"
+        "- Do not mention chunks, combining, or summarization process\n"
+        "- No bullet points\n"
+        "- No headings\n"
+        "- Output only the final summary text\n\n"
+
+        "Partial summaries:\n"
         f"{combined}"
     )
 
@@ -229,32 +307,15 @@ def summarize_to_under_limit(text: str, limit_chars: int = MAX_CHARS) -> str:
     return final_summary
 
 
-def _resolve_input_path(filename: str) -> str:
-    """
-    입력 파일을 1) 현재 작업 디렉토리, 2) 스크립트가 있는 디렉토리 순서로 찾는다.
-    """
-    candidates = [filename]
-
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-
-    raise FileNotFoundError(
-        f"입력 CSV을 찾을 수 없습니다: '{filename}'. "
-        f"현재 위치 또는 스크립트 폴더에 있어야 합니다. "
-        f"스크립트 폴더: '{os.path.dirname(__file__)}'"
-    )
-
-
 def main() -> None:
     _check_ollama()
-    input_path = _resolve_input_path(INPUT_CSV)
+    input_path = INPUT_CSV
     output_path = OUTPUT_CSV
 
     df = pd.read_csv(input_path, encoding="utf-8-sig")
 
     if BODY_COL not in df.columns:
-        raise ValueError(f"'{BODY_COL}' 컬럼을 찾을 수 없습니다. 현재 컬럼: {list(df.columns)}")
+        raise ValueError(f"Column '{BODY_COL}' not found. Available columns: {list(df.columns)}")
 
     df[BODY_COL] = df[BODY_COL].fillna("").astype(str)
     lengths = df[BODY_COL].str.len()
@@ -262,16 +323,16 @@ def main() -> None:
     need_summary_mask = lengths >= MAX_CHARS
 
     indices = df.index[need_summary_mask].tolist()
-    print(f"[INFO] {len(df)} rows, 요약 대상: {len(indices)} rows (>= {MAX_CHARS} chars)")
+    print(f"[INFO] {len(df)} rows, rows to summarize: {len(indices)} (>= {MAX_CHARS} chars)")
 
     for i, idx in enumerate(indices, start=1):
         text = df.at[idx, BODY_COL]
+        _log(f"[MAIN] processing document {i}/{len(indices)} row={idx} body_len={len(text)}")
 
         try:
             summary = summarize_to_under_limit(text, limit_chars=MAX_CHARS)
         except Exception as e:
-            # LLM 호출 실패 시: 최소한 길이 제한만 보장(트레이닝용으로는 품질이 낮을 수 있음)
-            print(f"[WARN] 요약 실패 row={idx}: {e} -> 원문을 {MAX_CHARS}자로 절단")
+            print(f"[WARN] summarize failed row={idx}: {e} -> truncating to {MAX_CHARS} chars")
             summary = text[:MAX_CHARS].rstrip()
 
         df.at[idx, BODY_COL] = summary
@@ -280,7 +341,7 @@ def main() -> None:
             time.sleep(SLEEP_BETWEEN_CALLS_SEC)
 
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"[DONE] 저장 완료: {output_path}")
+    print(f"[DONE] saved: {output_path}")
 
 
 if __name__ == "__main__":

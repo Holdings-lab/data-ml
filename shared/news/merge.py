@@ -18,7 +18,7 @@ SENTIMENT_FILL_ZERO_COLUMNS = [
     "body_sentiment_score",
     "category_BIS",
     "category_FOMC",
-    "category_White House",
+    "category_UCSB",
     "body_n_chunks",
 ]
 
@@ -27,6 +27,8 @@ REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = [
     "body_sentiment_gap",
     "sentiment_shock",
     "body_sentiment_score",
+    "days_since_news",
+    "body_sentiment_decay_3d",
 ]
 
 
@@ -56,10 +58,16 @@ def _merge_daily_news_table(
         if column not in merged.columns:
             merged[column] = 0.0
 
-    merged[SENTIMENT_FILL_ZERO_COLUMNS] = (
-        merged[SENTIMENT_FILL_ZERO_COLUMNS]
-        .ffill()
-        .fillna(0.0)
+    # ffill 대신 0으로 채워 뉴스 없는 날은 무신호(0)로 처리한다.
+    # ffill을 쓰면 며칠 전 뉴스 감성이 아무 뉴스 없는 날까지 그대로 전파돼
+    # "뉴스 없음"과 "예전 뉴스 잔존 영향"이 섞여 왜곡될 수 있다.
+    merged[SENTIMENT_FILL_ZERO_COLUMNS] = merged[SENTIMENT_FILL_ZERO_COLUMNS].fillna(0.0)
+
+    # 마지막 뉴스 이후 경과 일수 계산 (train_regression.py와 동일)
+    # 모델이 "오늘 뉴스"와 "며칠 전 뉴스"를 구분해서 학습할 수 있도록 돕는다.
+    last_news_date = merged["Date"].where(merged["news_count"] > 0).ffill()
+    merged["days_since_news"] = (
+        (merged["Date"] - last_news_date).dt.days.clip(upper=30).fillna(30).astype(float)
     )
 
     merged = merged.ffill().fillna(0.0)
@@ -90,6 +98,11 @@ def _build_regression_style_news_features(merged: pd.DataFrame) -> list[str]:
     )
     merged["sentiment_shock"] = (
         merged["sentiment_gap"] - merged["sentiment_gap"].rolling(5).mean()
+    )
+    # 반감기 3일 감쇠: 같은 감성 점수라도 오래된 뉴스일수록 영향력을 줄인다.
+    # days_since_news는 _merge_daily_news_table에서 이미 계산되어 있다.
+    merged["body_sentiment_decay_3d"] = merged["body_sentiment_score"] * (
+        0.5 ** (merged["days_since_news"] / 3.0)
     )
     merged = merged.fillna(0.0)
     return REGRESSION_STYLE_NEWS_FEATURE_COLUMNS.copy()
