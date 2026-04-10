@@ -2,7 +2,7 @@
   "experiment_name": "market_news",
   "best_horizon": 15,
   "best_horizon_direction_score": null,
-  "selected_feature_count": 18,
+  "selected_feature_count": 20,
   "selected_features": [
     "ret_5",
     "ret_accel",
@@ -21,7 +21,9 @@
     "sentiment_gap",
     "body_sentiment_gap",
     "sentiment_shock",
-    "body_sentiment_score"
+    "body_sentiment_score",
+    "days_since_news",
+    "body_sentiment_decay_3d"
   ],
   "feature_frame_start_date": "2015-01-08",
   "feature_frame_end_date": "2025-12-09",
@@ -32,14 +34,14 @@
   "test_start_date": "2023-10-02",
   "test_end_date": "2025-12-09",
   "metrics": {
-    "mae": 15.500081630196302,
-    "rmse": 20.380359093273338,
-    "r2_score": 0.9126897522449406,
-    "direction_accuracy": 0.7181818181818181,
-    "mape": 3.249039627612862,
-    "baseline_mae": 17.071180530894885,
-    "baseline_rmse": 21.543078890857146,
-    "baseline_mape": 3.546048544872557
+    "mae": 15.510713146727834,
+    "rmse": 20.412965050134908,
+    "r2_score": 0.9124101635053836,
+    "direction_accuracy": 0.7218181818181818,
+    "mape": 3.2450605440335303,
+    "baseline_mae": 17.071183360706677,
+    "baseline_rmse": 21.543080899713782,
+    "baseline_mape": 3.546049117188546
   },
   "config": {
     "target_ticker": "QQQ",
