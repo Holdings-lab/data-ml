@@ -1,0 +1,28 @@
+{
+  "target_ticker": "QQQ",
+  "horizon": 2,
+  "random_seed": 42,
+  "event_threshold_pct": 2.0,
+  "event_model": "LSTM quarterly event gate, quality-news + market-long event score",
+  "direction_model": "XGBoost market-long event-only T+2 classifier",
+  "direction_training_rule": "For each test quarter, train only on prior rows whose T+h target_date is before the quarter start; then keep only historical large-move rows where abs(T+2 log return) >= 2.00%.",
+  "normal_thresholds": {
+    "deep_drawdown": 0.5,
+    "middle_drawdown": 0.65,
+    "shallow_drawdown": 0.7
+  },
+  "high_confidence_thresholds": {
+    "deep_drawdown": 0.6,
+    "middle_drawdown": 0.8,
+    "shallow_drawdown": 0.8
+  },
+  "strong_thresholds": {
+    "deep_drawdown": 0.75,
+    "middle_drawdown": 0.8,
+    "shallow_drawdown": 0.8
+  },
+  "direction_threshold": 0.5,
+  "lstm_combo_root": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\event_direction_combo_h2_drawdown-tertile-threshold_event_market_long_raw_direction",
+  "market_long_training_frame_path": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\market_only_long\\training_frame.csv",
+  "output_root": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\event_direction_combo_h2_lstm_event_xgb_market_long_event_only_direction"
+}

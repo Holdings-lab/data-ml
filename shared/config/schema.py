@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,9 +15,9 @@ from shared.config.ticker_presets import (
 
 class FedDocument(TypedDict, total=False):
     """
-    레거시 FOMC 크롤러가 반환하던 원시 문서 스키마.
+    ?덇굅??FOMC ?щ·?ш? 諛섑솚?섎뜕 ?먯떆 臾몄꽌 ?ㅽ궎留?
 
-    기존 코드와의 호환성을 유지하기 위해 남겨둔다.
+    湲곗〈 肄붾뱶????명솚?깆쓣 ?좎??섍린 ?꾪빐 ?④꺼?붾떎.
     """
     release_date: str
     release_time: str
@@ -31,10 +31,10 @@ class FedDocument(TypedDict, total=False):
 
 class StandardNewsDocument(TypedDict, total=False):
     """
-    크롤러 후처리가 끝난 뒤, 학습 파이프라인으로 넘길 때 사용하는 표준 스키마.
+    ?щ·???꾩쿂由ш? ?앸궃 ?? ?숈뒿 ?뚯씠?꾨씪?몄쑝濡??섍만 ???ъ슜?섎뒗 ?쒖? ?ㅽ궎留?
 
-    원본 수집기별 컬럼명이 달라도 이 스키마로 맞춘 뒤 사용하면
-    이후 단계에서는 "문서 출처"보다 "문서가 어떤 속성을 갖는지"에 집중할 수 있다.
+    ?먮낯 ?섏쭛湲곕퀎 而щ읆紐낆씠 ?щ씪?????ㅽ궎留덈줈 留욎텣 ???ъ슜?섎㈃
+    ?댄썑 ?④퀎?먯꽌??"臾몄꽌 異쒖쿂"蹂대떎 "臾몄꽌媛 ?대뼡 ?띿꽦??媛뽯뒗吏"??吏묒쨷?????덈떎.
     """
     date: str
     category: str
@@ -50,10 +50,10 @@ class StandardNewsDocument(TypedDict, total=False):
 
 class DailyNewsFeatureRow(TypedDict, total=False):
     """
-    문서 단위 데이터를 일자 단위 숫자 피처로 집계한 뒤의 스키마.
+    臾몄꽌 ?⑥쐞 ?곗씠?곕? ?쇱옄 ?⑥쐞 ?レ옄 ?쇱쿂濡?吏묎퀎???ㅼ쓽 ?ㅽ궎留?
 
-    학습 모델은 텍스트 문서를 직접 받기보다, 날짜별 이벤트 밀도와 감성 강도처럼
-    숫자로 압축된 입력을 받는 편이 훨씬 안정적이다.
+    ?숈뒿 紐⑤뜽? ?띿뒪??臾몄꽌瑜?吏곸젒 諛쏄린蹂대떎, ?좎쭨蹂??대깽??諛?꾩? 媛먯꽦 媛뺣룄泥섎읆
+    ?レ옄濡??뺤텞???낅젰??諛쏅뒗 ?몄씠 ?⑥뵮 ?덉젙?곸씠??
     """
     date: str
     news_count: int
@@ -76,10 +76,10 @@ def _training_data_path_no_create(*parts: str) -> Path:
 @dataclass(frozen=True)
 class MarketNewsTrainingConfig:
     """
-    뉴스 피처와 시장 가격 피처를 함께 학습할 때 사용하는 실행 설정.
+    ?댁뒪 ?쇱쿂? ?쒖옣 媛寃??쇱쿂瑜??④퍡 ?숈뒿?????ъ슜?섎뒗 ?ㅽ뻾 ?ㅼ젙.
 
-    한곳에서 기본값을 관리해 두면, 팀원이 스크립트를 실행할 때
-    "어떤 입력을 읽고 어떤 결과를 어디에 쓰는지"를 훨씬 빠르게 이해할 수 있다.
+    ?쒓납?먯꽌 湲곕낯媛믪쓣 愿由ы빐 ?먮㈃, ??먯씠 ?ㅽ겕由쏀듃瑜??ㅽ뻾????
+    "?대뼡 ?낅젰???쎄퀬 ?대뼡 寃곌낵瑜??대뵒???곕뒗吏"瑜??⑥뵮 鍮좊Ⅴ寃??댄빐?????덈떎.
     """
     target_ticker: str = "QQQ"
     preset_name: str = "default"
@@ -208,13 +208,33 @@ class MarketNewsTrainingConfig:
     horizon_candidates: tuple[int, ...] = (5, 7, 10, 15)
     top_feature_count: int = 30
     training_embedding_pca_components: int = 5
+    use_news_embeddings: bool = False
     optuna_trials: int = 200
     train_ratio: float = 0.8
     random_seed: int = 42
     aligned_comparison_start_date: str | None = None
     regression_style_fixed_horizon: int = 5
     market_news_only: bool = False
-
+    verbose_output: bool = False
+    lstm_device: str = "auto"
+    lstm_seq_len: int = 10
+    lstm_hidden_size: int = 32
+    lstm_num_layers: int = 2
+    lstm_dropout: float = 0.2
+    lstm_batch_size: int = 32
+    lstm_epochs: int = 100
+    lstm_learning_rate: float = 1e-3
+    lstm_early_stopping_patience: int = 15
+    lstm_huber_delta: float = 1.0
+    lstm_return_loss_weight: float = 0.2
+    lstm_event_loss_weight: float = 1.0
+    lstm_direction_loss_weight: float = 1.0
+    lstm_direction_return_threshold: float = 2.0
+    lstm_event_min_recall: float = 0.4
+    lstm_event_selection_objective: str = "ranking"
+    lstm_event_probability_threshold: float | None = None
+    lstm_direction_probability_threshold: float | None = 0.5
+    lstm_weight_decay: float = 1e-4
 
 def make_training_config(
     ticker: str,
@@ -223,20 +243,20 @@ def make_training_config(
     **overrides,
 ) -> MarketNewsTrainingConfig:
     """
-    티커 이름 기반으로 출력 경로를 자동 생성한 MarketNewsTrainingConfig를 반환한다.
+    ?곗빱 ?대쫫 湲곕컲?쇰줈 異쒕젰 寃쎈줈瑜??먮룞 ?앹꽦??MarketNewsTrainingConfig瑜?諛섑솚?쒕떎.
 
-    QQQ 외 다른 ETF(XLE, XLK 등)를 추가할 때 출력 파일이 겹치지 않도록
-    모든 경로를 ticker 이름으로 prefix한다.
+    QQQ ???ㅻⅨ ETF(XLE, XLK ??瑜?異붽?????異쒕젰 ?뚯씪??寃뱀튂吏 ?딅룄濡?
+    紐⑤뱺 寃쎈줈瑜?ticker ?대쫫?쇰줈 prefix?쒕떎.
 
     Parameters
     ----------
-    ticker        : 예측 대상 티커 (예: "XLE", "QQQ")
-    news_input_path : 해당 티커의 뉴스 임베딩 CSV 경로.
-                    None이면 data/crawler/features/{ticker}/ 아래의
-                    merged_finbert_with_embeddings.csv를 우선 사용하고,
-                    없으면 예전 flat 파일명으로 fallback한다.
-    **overrides   : MarketNewsTrainingConfig 필드 직접 덮어쓰기
-                    (예: macro_tickers=(...), optuna_trials=300)
+    ticker        : ?덉륫 ????곗빱 (?? "XLE", "QQQ")
+    news_input_path : ?대떦 ?곗빱???댁뒪 ?꾨쿋??CSV 寃쎈줈.
+                    None?대㈃ data/crawler/features/{ticker}/ ?꾨옒??
+                    merged_finbert_with_embeddings.csv瑜??곗꽑 ?ъ슜?섍퀬,
+                    ?놁쑝硫??덉쟾 flat ?뚯씪紐낆쑝濡?fallback?쒕떎.
+    **overrides   : MarketNewsTrainingConfig ?꾨뱶 吏곸젒 ??뼱?곌린
+                    (?? macro_tickers=(...), optuna_trials=300)
     """
     normalized_ticker = ticker.upper()
     t = ticker_slug(normalized_ticker)
@@ -324,4 +344,6 @@ def make_training_config(
     config_values.update(overrides)
 
     return MarketNewsTrainingConfig(**config_values)
+
+
 

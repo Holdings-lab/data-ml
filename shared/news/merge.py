@@ -19,6 +19,7 @@ BASE_CATEGORY_FILL_ZERO_COLUMNS = [
 
 EMBEDDING_DECAY_MAX_DAYS = 5
 EMBEDDING_DECAY_HALF_LIFE_DAYS = 3.0
+NEWS_LAG_TRADING_DAYS = 1
 
 SENTIMENT_FILL_ZERO_COLUMNS = [
     "news_count",
@@ -34,9 +35,23 @@ SENTIMENT_FILL_ZERO_COLUMNS = [
     "body_sentiment_score",
 ]
 
-REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = [
+# Quantity/activity features are intentionally excluded from model inputs.
+# We want the news branch to represent the quality/tone of the news, not how
+# many articles appeared or how recently an article appeared.
+NEWS_ACTIVITY_FEATURE_COLUMNS: list[str] = []
+
+NEWS_QUANTITY_FEATURE_COLUMNS = [
+    "news_any_1d",
+    "news_count",
     "news_count_5d",
+    "news_count_change_1d",
+    "news_count_surprise_20d",
     "days_since_news",
+    "fomc_news_1d",
+    "fomc_recent_5d",
+]
+
+NEWS_SENTIMENT_FEATURE_COLUMNS = [
     "sentiment_gap",
     "body_sentiment_gap",
     "sentiment_shock",
@@ -45,9 +60,39 @@ REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = [
     "negative_news_spike_5d",
     "body_sentiment_decay_3d",
     "fomc_sentiment",
-    "fomc_recent_5d",
     "sentiment_divergence",
 ]
+
+REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = (
+    NEWS_ACTIVITY_FEATURE_COLUMNS + NEWS_SENTIMENT_FEATURE_COLUMNS
+)
+
+# Event features aimed at the next trading day. Raw news values have already
+# been delayed by one market row before these columns are built.
+T1_EVENT_NEWS_FEATURE_COLUMNS = [
+    "title_sentiment_score",
+    "body_sentiment_score",
+    "title_sentiment_intensity_1d",
+    "body_sentiment_intensity_1d",
+    "body_sentiment_change_abs_1d",
+    "body_sentiment_surprise_abs_20d",
+    "negative_news_ratio",
+    "positive_news_ratio",
+    "sentiment_divergence",
+    "fomc_sentiment_intensity_1d",
+]
+
+T1_HYBRID_NEWS_FEATURE_COLUMNS = list(
+    dict.fromkeys(
+        REGRESSION_STYLE_NEWS_FEATURE_COLUMNS
+        + [
+            "body_sentiment_intensity_1d",
+            "body_sentiment_change_abs_1d",
+            "body_sentiment_surprise_abs_20d",
+            "fomc_sentiment_intensity_1d",
+        ]
+    )
+)
 
 
 def _rolling_zscore(series: pd.Series, window: int, min_periods: int = 5) -> pd.Series:
@@ -90,6 +135,12 @@ def _merge_daily_news_table(
 
     merged = merged.merge(news, left_on="Date", right_on="date", how="left")
 
+    # Source rows only have a calendar date, not a reliable publication time.
+    # Delay every raw news value by one market row so an after-close document
+    # can never enter the feature vector for that same closing price.
+    raw_news_columns = [column for column in news.columns if column != "date"]
+    merged[raw_news_columns] = merged[raw_news_columns].shift(NEWS_LAG_TRADING_DAYS)
+
     for column, default_value in NEUTRAL_FILL_DEFAULTS.items():
         if column not in merged.columns:
             merged[column] = default_value
@@ -126,8 +177,9 @@ def _merge_daily_news_table(
         )
         merged[emb_cols] = last_embedding_values.mul(embedding_decay, axis=0)
 
-    merged = merged.fillna(0.0)
-    merged["news_count_lag1"] = merged["news_count"].shift(1).fillna(0.0)
+    # `news_count` is already delayed by one trading row above. Keep the
+    # explicit legacy column without accidentally applying a second lag.
+    merged["news_count_lag1"] = merged["news_count"]
     return merged.drop(columns=["date"], errors="ignore")
 
 
@@ -187,9 +239,65 @@ def _build_regression_style_news_features(merged: pd.DataFrame) -> list[str]:
         merged[f"body_sentiment_decay_{half_life}d"] = last_body_sentiment * (
             0.5 ** (merged["days_since_news"] / half_life)
         )
-    merged.fillna(0.0, inplace=True)
     emb_cols = [c for c in merged.columns if c.startswith("body_emb_")]
-    return REGRESSION_STYLE_NEWS_FEATURE_COLUMNS + emb_cols
+    model_news_columns = REGRESSION_STYLE_NEWS_FEATURE_COLUMNS + emb_cols
+    merged[model_news_columns] = merged[model_news_columns].fillna(0.0)
+    return model_news_columns
+
+
+def build_t1_event_news_features(
+    frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build short-lived, magnitude-oriented news features for T+1 events."""
+    required = [
+        "news_count",
+        "title_sentiment_score",
+        "body_sentiment_score",
+        "negative_news_ratio",
+        "positive_news_ratio",
+        "category_FOMC",
+    ]
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"T+1 news feature frame is missing columns: {missing}")
+
+    result = frame.copy()
+    news_count = result["news_count"].fillna(0.0).astype(float)
+    title_sentiment = result["title_sentiment_score"].fillna(0.0).astype(float)
+    body_sentiment = result["body_sentiment_score"].fillna(0.0).astype(float)
+    news_any = news_count.gt(0.0).astype(float)
+
+    count_history = news_count.shift(1).rolling(20, min_periods=5)
+    count_mean = count_history.mean()
+    count_std = count_history.std(ddof=0)
+    result["news_any_1d"] = news_any
+    result["news_count_change_1d"] = news_count.diff().fillna(0.0)
+    result["news_count_surprise_20d"] = (
+        (news_count - count_mean) / (count_std + 1e-9)
+    ).where(count_std > 0.0, 0.0).fillna(0.0)
+
+    result["title_sentiment_intensity_1d"] = title_sentiment.abs()
+    result["body_sentiment_intensity_1d"] = body_sentiment.abs()
+    result["body_sentiment_change_abs_1d"] = (
+        body_sentiment - body_sentiment.shift(1)
+    ).abs().fillna(0.0)
+    past_news_sentiment = (
+        body_sentiment.where(news_any.gt(0.0)).shift(1).rolling(20, min_periods=3).mean()
+    )
+    result["body_sentiment_surprise_abs_20d"] = (
+        (body_sentiment - past_news_sentiment).abs() * news_any
+    ).fillna(0.0)
+
+    if "sentiment_divergence" not in result.columns:
+        result["sentiment_divergence"] = (title_sentiment - body_sentiment).abs()
+    result["fomc_news_1d"] = result["category_FOMC"].fillna(0.0).astype(float)
+    result["fomc_sentiment_intensity_1d"] = (
+        body_sentiment.abs() * result["fomc_news_1d"]
+    )
+    result[T1_EVENT_NEWS_FEATURE_COLUMNS] = result[
+        T1_EVENT_NEWS_FEATURE_COLUMNS
+    ].fillna(0.0)
+    return result, list(T1_EVENT_NEWS_FEATURE_COLUMNS)
 
 
 def merge_news_features_into_market_frame(
@@ -203,4 +311,5 @@ def merge_news_features_into_market_frame(
     """
     merged = _merge_daily_news_table(market_df, daily_news_df)
     model_news_feature_columns = _build_regression_style_news_features(merged)
+    merged, _ = build_t1_event_news_features(merged)
     return merged, model_news_feature_columns

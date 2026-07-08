@@ -1,0 +1,23 @@
+{
+  "input": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\xgb_h2_direction_probe\\lstm_event_plus_market_long_classifier_event_only_merged.csv",
+  "output": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\xgb_h2_threshold_search",
+  "candidate_count": 960,
+  "warmup_quarters": 4,
+  "post_warmup_quarters": [
+    "2023Q1",
+    "2023Q2",
+    "2023Q3",
+    "2023Q4",
+    "2024Q1",
+    "2024Q2",
+    "2024Q3",
+    "2024Q4",
+    "2025Q1",
+    "2025Q2",
+    "2025Q3",
+    "2025Q4",
+    "2026Q1"
+  ],
+  "no_leak_rule": "For each test quarter, thresholds are selected using previous quarters only; first warmup quarters use default thresholds.",
+  "note": "diagnostic rows with LEAKY are not deployable because they use the whole OOS period to choose thresholds."
+}
