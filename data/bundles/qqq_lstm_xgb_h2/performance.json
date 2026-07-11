@@ -1,0 +1,57 @@
+{
+  "source": "C:\\Users\\admin\\LSTM\\data\\training\\qqq\\event_direction_combo_h2_lstm_event_xgb_market_long_event_only_direction",
+  "alert_summary": [
+    {
+      "Alert_Tier": "Normal",
+      "Rows": 1064,
+      "Actual_Events": 305,
+      "Warnings": 398,
+      "Event_TP": 207,
+      "Event_FP": 191,
+      "Event_FN": 98,
+      "Event_Precision": 0.5201005025125628,
+      "Event_Recall": 0.6786885245901639,
+      "Event_F1": 0.5889046941678521,
+      "Event_And_Direction_Correct": 118,
+      "Event_And_Direction_Per_Warning": 0.2964824120603015,
+      "Event_And_Direction_Recall": 0.3868852459016393,
+      "Direction_Accuracy_On_True_Warnings": 0.5700483091787439,
+      "Predicted_Up_Rate": 0.3646616541353383
+    },
+    {
+      "Alert_Tier": "High_Confidence",
+      "Rows": 1064,
+      "Actual_Events": 305,
+      "Warnings": 276,
+      "Event_TP": 158,
+      "Event_FP": 118,
+      "Event_FN": 147,
+      "Event_Precision": 0.572463768115942,
+      "Event_Recall": 0.5180327868852459,
+      "Event_F1": 0.5438898450946644,
+      "Event_And_Direction_Correct": 94,
+      "Event_And_Direction_Per_Warning": 0.3405797101449275,
+      "Event_And_Direction_Recall": 0.3081967213114754,
+      "Direction_Accuracy_On_True_Warnings": 0.5949367088607594,
+      "Predicted_Up_Rate": 0.3646616541353383
+    },
+    {
+      "Alert_Tier": "Strong",
+      "Rows": 1064,
+      "Actual_Events": 305,
+      "Warnings": 160,
+      "Event_TP": 99,
+      "Event_FP": 61,
+      "Event_FN": 206,
+      "Event_Precision": 0.61875,
+      "Event_Recall": 0.3245901639344262,
+      "Event_F1": 0.4258064516129032,
+      "Event_And_Direction_Correct": 65,
+      "Event_And_Direction_Per_Warning": 0.40625,
+      "Event_And_Direction_Recall": 0.2131147540983606,
+      "Direction_Accuracy_On_True_Warnings": 0.6565656565656566,
+      "Predicted_Up_Rate": 0.3646616541353383
+    }
+  ],
+  "note": "Historical OOS performance from the evaluation pipeline; production artifacts are trained separately for inference."
+}

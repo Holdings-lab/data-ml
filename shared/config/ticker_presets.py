@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -153,7 +153,7 @@ DEFAULT_TICKER_PRESET = TickerTrainingPreset(
     supplementary_ticker_feature_suffixes=DEFAULT_SUPPLEMENTARY_TICKER_FEATURE_SUFFIXES,
     market_feature_columns=BASE_MARKET_FEATURE_COLUMNS,
     horizon_candidates=(5, 7, 10, 15),
-    regression_style_fixed_horizon=5,
+    regression_style_fixed_horizon=2,
     training_embedding_pca_components=5,
     top_feature_count=30,
     optuna_trials=200,
@@ -167,7 +167,7 @@ NAMED_TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
         supplementary_ticker_feature_suffixes=DEFAULT_SUPPLEMENTARY_TICKER_FEATURE_SUFFIXES,
         market_feature_columns=BASE_MARKET_FEATURE_COLUMNS,
         horizon_candidates=(5, 7, 10, 15),
-        regression_style_fixed_horizon=5,
+        regression_style_fixed_horizon=2,
         training_embedding_pca_components=5,
         top_feature_count=30,
         optuna_trials=200,
@@ -179,7 +179,7 @@ NAMED_TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
         supplementary_ticker_feature_suffixes=DEFAULT_SUPPLEMENTARY_TICKER_FEATURE_SUFFIXES,
         market_feature_columns=QQQ_GROWTH_TECH_MARKET_FEATURE_COLUMNS,
         horizon_candidates=(5, 7, 10, 15),
-        regression_style_fixed_horizon=5,
+        regression_style_fixed_horizon=2,
         training_embedding_pca_components=5,
         top_feature_count=30,
         optuna_trials=200,
@@ -191,7 +191,7 @@ NAMED_TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
         supplementary_ticker_feature_suffixes=(),
         market_feature_columns=XLE_MARKET_FEATURE_COLUMNS,
         horizon_candidates=(3, 5, 10, 20),
-        regression_style_fixed_horizon=5,
+        regression_style_fixed_horizon=2,
         training_embedding_pca_components=5,
         top_feature_count=35,
         optuna_trials=30,
@@ -203,7 +203,7 @@ NAMED_TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
         supplementary_ticker_feature_suffixes=(),
         market_feature_columns=XLF_MARKET_FEATURE_COLUMNS,
         horizon_candidates=(3, 5, 10, 20),
-        regression_style_fixed_horizon=5,
+        regression_style_fixed_horizon=2,
         training_embedding_pca_components=5,
         top_feature_count=40,
         optuna_trials=30,
@@ -262,3 +262,4 @@ def get_ticker_training_preset(
 
     available = ", ".join(available_ticker_presets())
     raise ValueError(f"Unknown ticker preset: {preset}. Available presets: {available}")
+

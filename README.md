@@ -355,3 +355,30 @@ data/
 - `policy_monitor.py`의 테스트용 고정 날짜를 실제 운영용 날짜 계산으로 되돌리기
 - `requirements.txt`에 크롤러/후처리 확장 의존성을 별도 extra처럼 정리하기
 - profile 대표 뉴스를 전체 source news가 아니라 label/test 기간 근처 뉴스로 제한하는 옵션 추가하기
+
+## LSTM + XGBoost backend inference bundle
+
+Create the QQQ T+2 backend bundle:
+
+```bash
+python shared/export_model_bundle.py --target-ticker QQQ --horizon 2
+```
+
+Bundle output:
+
+```text
+data/bundles/qqq_lstm_xgb_h2/
+```
+
+The bundle contains LSTM event models, the XGBoost direction model, feature schema, thresholds, and historical performance summary. Backend inference can load it with:
+
+```python
+import pandas as pd
+from shared.inference.lstm_xgb_bundle import load_bundle, predict_from_feature_frames
+
+bundle = load_bundle("data/bundles/qqq_lstm_xgb_h2")
+news = pd.read_csv("data/bundles/qqq_lstm_xgb_h2/sample_news_event_recent_rows.csv")
+market = pd.read_csv("data/bundles/qqq_lstm_xgb_h2/sample_market_long_recent_rows.csv")
+result = predict_from_feature_frames(bundle, news, market)
+print(result)
+```

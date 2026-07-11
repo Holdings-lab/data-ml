@@ -203,7 +203,7 @@ class MarketNewsTrainingConfig:
             "cluster_visualization.png",
         )
     )
-    cluster_horizon: int = 5
+    cluster_horizon: int = 2
     cluster_window_days: int = 5
     horizon_candidates: tuple[int, ...] = (5, 7, 10, 15)
     top_feature_count: int = 30
@@ -213,7 +213,7 @@ class MarketNewsTrainingConfig:
     train_ratio: float = 0.8
     random_seed: int = 42
     aligned_comparison_start_date: str | None = None
-    regression_style_fixed_horizon: int = 5
+    regression_style_fixed_horizon: int = 2
     market_news_only: bool = False
     verbose_output: bool = False
     lstm_device: str = "auto"
@@ -344,6 +344,8 @@ def make_training_config(
     config_values.update(overrides)
 
     return MarketNewsTrainingConfig(**config_values)
+
+
 
 
 

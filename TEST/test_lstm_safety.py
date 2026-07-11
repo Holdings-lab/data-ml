@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -39,7 +39,7 @@ class LSTMSafetyTests(unittest.TestCase):
         config = make_training_config("QQQ")
 
         self.assertEqual(config.preset_name, "qqq_growth_tech")
-        self.assertEqual(config.regression_style_fixed_horizon, 5)
+        self.assertEqual(config.regression_style_fixed_horizon, 2)
         self.assertFalse(config.use_news_embeddings)
         self.assertEqual(config.lstm_device, "auto")
         self.assertEqual(config.lstm_huber_delta, 1.0)
@@ -241,3 +241,4 @@ class LSTMSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

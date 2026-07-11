@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
@@ -293,7 +293,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--news-only", action="store_true")
     parser.add_argument("--event-only", action="store_true")
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--horizon", type=int, default=5)
+    parser.add_argument("--horizon", type=int, default=2)
     parser.add_argument(
         "--event-selection-objective",
         choices=("ranking", "precision_at_recall"),
@@ -329,3 +329,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

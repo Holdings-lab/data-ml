@@ -30,6 +30,8 @@ from shared.run_event_direction_combo import (
     default_event_root,
     default_event_training_frame,
     run_combo_pipeline,
+    _direction_predictions_path,
+    _event_predictions_path,
 )
 
 NORMAL_THRESHOLDS = DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS
@@ -334,6 +336,7 @@ def run_lstm_xgb_event_direction_flow(
     lstm_combo_root: Path,
     market_long_training_frame_path: Path,
     skip_lstm_component_training: bool,
+    force_retrain_lstm_components: bool,
     random_seed: int,
     start_quarter: str,
     event_threshold_pct: float,
@@ -346,6 +349,22 @@ def run_lstm_xgb_event_direction_flow(
     event_root = default_event_root(target_ticker, horizon)
     direction_root = default_direction_root(target_ticker, horizon)
     event_training_frame = default_event_training_frame(target_ticker)
+    event_predictions_path = _event_predictions_path(event_root)
+    direction_predictions_path = _direction_predictions_path(direction_root)
+
+    print()
+    print(f"{target_ticker.upper()} final flow T+{horizon}")
+    if force_retrain_lstm_components:
+        print("  LSTM components : force retrain enabled")
+    elif skip_lstm_component_training:
+        print("  LSTM components : reuse existing only (--skip-lstm-component-training)")
+    else:
+        event_status = "reuse existing" if event_predictions_path.exists() else "train now"
+        direction_status = (
+            "reuse existing" if direction_predictions_path.exists() else "train now"
+        )
+        print(f"  LSTM event      : {event_status} ({event_predictions_path})")
+        print(f"  LSTM direction  : {direction_status} ({direction_predictions_path})")
 
     # Build/read the LSTM event base. The LSTM direction in this base is kept for
     # comparison only; final direction comes from XGBoost below.
@@ -360,6 +379,7 @@ def run_lstm_xgb_event_direction_flow(
         event_training_frame=event_training_frame,
         direction_training_frame=market_long_training_frame_path,
         skip_component_training=skip_lstm_component_training,
+        force_retrain=force_retrain_lstm_components,
         event_selection_objective="ranking",
         event_min_recall=0.4,
         event_gate=DEFAULT_EVENT_GATE,
@@ -371,6 +391,7 @@ def run_lstm_xgb_event_direction_flow(
         raise FileNotFoundError(f"Missing LSTM combo predictions: {combo_path}")
     lstm_combo = pd.read_csv(combo_path, parse_dates=["Current_Date", "Target_Date"])
 
+    print("  XGBoost direction: train walk-forward now")
     xgb_predictions = train_xgb_market_long_event_only_direction(
         lstm_combo=lstm_combo,
         market_long_training_frame_path=market_long_training_frame_path,
@@ -471,6 +492,8 @@ def run_lstm_xgb_event_direction_flow(
             "shallow_drawdown": strong_thresholds[2],
         },
         "direction_threshold": direction_threshold,
+        "skip_lstm_component_training": bool(skip_lstm_component_training),
+        "force_retrain_lstm_components": bool(force_retrain_lstm_components),
         "lstm_combo_root": str(lstm_combo_root),
         "market_long_training_frame_path": str(market_long_training_frame_path),
         "output_root": str(output_root),
@@ -547,6 +570,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use existing LSTM component predictions instead of retraining them.",
     )
+    parser.add_argument(
+        "--force-retrain-lstm-components",
+        action="store_true",
+        help="Retrain LSTM event/direction component predictions even if cached files exist.",
+    )
     return parser.parse_args()
 
 
@@ -576,6 +604,7 @@ def main() -> None:
         lstm_combo_root=lstm_combo_root,
         market_long_training_frame_path=market_long_training_frame_path,
         skip_lstm_component_training=args.skip_lstm_component_training,
+        force_retrain_lstm_components=args.force_retrain_lstm_components,
         random_seed=args.random_seed,
         start_quarter=args.start_quarter,
         event_threshold_pct=args.event_threshold_pct,
