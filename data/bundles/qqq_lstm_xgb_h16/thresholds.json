@@ -1,0 +1,24 @@
+{
+  "event_threshold_pct": 2.0,
+  "event_news_weight": 0.5,
+  "drawdown_tertile_cutpoints": [
+    -0.0941599,
+    -0.0192656
+  ],
+  "normal_thresholds": {
+    "deep_drawdown": 0.65,
+    "middle_drawdown": 0.69,
+    "shallow_drawdown": 0.76
+  },
+  "high_confidence_thresholds": {
+    "deep_drawdown": 0.66,
+    "middle_drawdown": 0.84,
+    "shallow_drawdown": 0.99
+  },
+  "strong_thresholds": {
+    "deep_drawdown": 0.71,
+    "middle_drawdown": 0.84,
+    "shallow_drawdown": 0.99
+  },
+  "direction_threshold": 0.4
+}

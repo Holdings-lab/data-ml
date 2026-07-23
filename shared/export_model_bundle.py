@@ -23,17 +23,17 @@ from shared.config.schema import make_training_config
 from shared.config.ticker_presets import ticker_slug
 from shared.run_event_direction_combo import (
     DEFAULT_DRAWDOWN_TERTILE_CUTPOINTS,
-    DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS,
     DEFAULT_EVENT_COMMON_START_DATE,
     DEFAULT_EVENT_NEWS_WEIGHT,
     DEFAULT_EVENT_THRESHOLD_PCT,
-    DEFAULT_HORIZON,
     DEFAULT_RANDOM_SEED,
 )
 from shared.run_event_walkforward import _load_feature_groups
 from shared.run_lstm_xgb_event_direction import (
+    DEFAULT_FINAL_HORIZON,
     DEFAULT_DIRECTION_THRESHOLD,
     HIGH_CONFIDENCE_THRESHOLDS,
+    NORMAL_THRESHOLDS,
     STRONG_THRESHOLDS,
     _build_supervised_frame as build_xgb_supervised_frame,
     _market_feature_columns,
@@ -260,8 +260,9 @@ def _copy_if_exists(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
-def _write_bundle_readme(bundle_root: Path) -> None:
-    readme = """# QQQ LSTM + XGBoost T+2 model bundle
+def _write_bundle_readme(bundle_root: Path, target_ticker: str, horizon: int) -> None:
+    ticker_slug_value = ticker_slug(target_ticker)
+    readme = f"""# {target_ticker.upper()} LSTM + XGBoost T+{horizon} model bundle
 
 This bundle is for inference only.
 
@@ -286,7 +287,7 @@ Python helper:
 ```python
 from shared.inference.lstm_xgb_bundle import load_bundle, predict_from_feature_frames
 
-bundle = load_bundle("data/bundles/qqq_lstm_xgb_h2")
+bundle = load_bundle("data/bundles/{ticker_slug_value}_lstm_xgb_h{horizon}")
 result = predict_from_feature_frames(bundle, news_event_frame, market_long_frame)
 ```
 """
@@ -363,9 +364,9 @@ def export_bundle(args: argparse.Namespace) -> Path:
         "event_news_weight": float(args.event_news_weight),
         "drawdown_tertile_cutpoints": [float(value) for value in DEFAULT_DRAWDOWN_TERTILE_CUTPOINTS],
         "normal_thresholds": {
-            "deep_drawdown": float(DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS[0]),
-            "middle_drawdown": float(DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS[1]),
-            "shallow_drawdown": float(DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS[2]),
+            "deep_drawdown": float(NORMAL_THRESHOLDS[0]),
+            "middle_drawdown": float(NORMAL_THRESHOLDS[1]),
+            "shallow_drawdown": float(NORMAL_THRESHOLDS[2]),
         },
         "high_confidence_thresholds": {
             "deep_drawdown": float(HIGH_CONFIDENCE_THRESHOLDS[0]),
@@ -406,7 +407,7 @@ def export_bundle(args: argparse.Namespace) -> Path:
         },
     }
     manifest = {
-        "bundle_version": "qqq_lstm_xgb_h2_v1",
+        "bundle_version": f"{ticker_slug(target_ticker)}_lstm_xgb_h{horizon}_v1",
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "target_ticker": target_ticker,
         "horizon": horizon,
@@ -445,7 +446,7 @@ def export_bundle(args: argparse.Namespace) -> Path:
     _json_dump(bundle_root / "feature_schema.json", feature_schema)
     _json_dump(bundle_root / "thresholds.json", thresholds)
     _json_dump(bundle_root / "performance.json", performance)
-    _write_bundle_readme(bundle_root)
+    _write_bundle_readme(bundle_root, target_ticker, horizon)
 
     _copy_if_exists(alert_summary_path, bundle_root / "evaluation" / "alert_summary.csv")
     _copy_if_exists(performance_root / "quarterly_breakdown.csv", bundle_root / "evaluation" / "quarterly_breakdown.csv")
@@ -470,7 +471,7 @@ def export_bundle(args: argparse.Namespace) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export backend inference bundle.")
     parser.add_argument("--target-ticker", default="QQQ")
-    parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
+    parser.add_argument("--horizon", type=int, default=DEFAULT_FINAL_HORIZON)
     parser.add_argument("--random-seed", type=int, default=DEFAULT_RANDOM_SEED)
     parser.add_argument("--event-threshold-pct", type=float, default=DEFAULT_EVENT_THRESHOLD_PCT)
     parser.add_argument("--event-news-weight", type=float, default=DEFAULT_EVENT_NEWS_WEIGHT)

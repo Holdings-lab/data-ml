@@ -18,11 +18,9 @@ from shared.config.schema import make_training_config
 from shared.config.ticker_presets import ticker_slug
 from shared.market.data import supplementary_ticker_feature_columns
 from shared.run_event_direction_combo import (
-    DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS,
     DEFAULT_EVENT_GATE,
     DEFAULT_EVENT_NEWS_WEIGHT,
     DEFAULT_EVENT_THRESHOLD_PCT,
-    DEFAULT_HORIZON,
     DEFAULT_RANDOM_SEED,
     DEFAULT_START_QUARTER,
     default_combo_root,
@@ -34,10 +32,17 @@ from shared.run_event_direction_combo import (
     _event_predictions_path,
 )
 
-NORMAL_THRESHOLDS = DEFAULT_DRAWDOWN_TERTILE_THRESHOLDS
-HIGH_CONFIDENCE_THRESHOLDS = (0.60, 0.80, 0.80)
-STRONG_THRESHOLDS = (0.75, 0.80, 0.80)
-DEFAULT_DIRECTION_THRESHOLD = 0.50
+DEFAULT_FINAL_HORIZON = 16
+
+# QQQ h16 thresholds selected to prioritize event+direction precision.
+# Search target:
+# - Normal: practical coverage, event recall around 30%
+# - High Confidence: balanced precision/coverage, event recall around 20%
+# - Strong: highest event+direction precision with event recall around 10%
+NORMAL_THRESHOLDS = (0.65, 0.69, 0.76)
+HIGH_CONFIDENCE_THRESHOLDS = (0.66, 0.84, 0.99)
+STRONG_THRESHOLDS = (0.71, 0.84, 0.99)
+DEFAULT_DIRECTION_THRESHOLD = 0.40
 DEFAULT_XGB_MIN_TRAIN_ROWS = 120
 
 
@@ -154,7 +159,7 @@ def train_xgb_market_long_event_only_direction(
 
         # Important leakage rule:
         # A row can be used for training only if its label target date is before the
-        # test quarter starts. This prevents T+2 labels from spilling into the quarter
+        # test quarter starts. This prevents T+h labels from spilling into the quarter
         # we are evaluating.
         train = supervised[supervised["target_date_horizon"] < quarter_start].copy()
         train = train[train["target_event_horizon"]].copy()
@@ -470,7 +475,7 @@ def run_lstm_xgb_event_direction_flow(
         "random_seed": random_seed,
         "event_threshold_pct": event_threshold_pct,
         "event_model": "LSTM quarterly event gate, quality-news + market-long event score",
-        "direction_model": "XGBoost market-long event-only T+2 classifier",
+        "direction_model": f"XGBoost market-long event-only T+{horizon} classifier",
         "direction_training_rule": (
             "For each test quarter, train only on prior rows whose T+h target_date is "
             "before the quarter start; then keep only historical large-move rows "
@@ -538,7 +543,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--target-ticker", default="QQQ")
-    parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
+    parser.add_argument("--horizon", type=int, default=DEFAULT_FINAL_HORIZON)
     parser.add_argument("--random-seed", type=int, default=DEFAULT_RANDOM_SEED)
     parser.add_argument("--start-quarter", default=DEFAULT_START_QUARTER)
     parser.add_argument("--event-threshold-pct", type=float, default=DEFAULT_EVENT_THRESHOLD_PCT)

@@ -1,0 +1,57 @@
+{
+  "source": "C:\\Users\\admin\\data-ml\\data\\training\\qqq\\event_direction_combo_h16_lstm_event_xgb_market_long_event_only_direction",
+  "alert_summary": [
+    {
+      "Alert_Tier": "Normal",
+      "Rows": 1064,
+      "Actual_Events": 763,
+      "Warnings": 364,
+      "Event_TP": 284,
+      "Event_FP": 80,
+      "Event_FN": 479,
+      "Event_Precision": 0.7802197802197802,
+      "Event_Recall": 0.3722149410222805,
+      "Event_F1": 0.5039929015084295,
+      "Event_And_Direction_Correct": 170,
+      "Event_And_Direction_Per_Warning": 0.467032967032967,
+      "Event_And_Direction_Recall": 0.2228047182175622,
+      "Direction_Accuracy_On_True_Warnings": 0.5985915492957746,
+      "Predicted_Up_Rate": 0.8045112781954887
+    },
+    {
+      "Alert_Tier": "High_Confidence",
+      "Rows": 1064,
+      "Actual_Events": 763,
+      "Warnings": 194,
+      "Event_TP": 157,
+      "Event_FP": 37,
+      "Event_FN": 606,
+      "Event_Precision": 0.8092783505154639,
+      "Event_Recall": 0.2057667103538663,
+      "Event_F1": 0.3281086729362591,
+      "Event_And_Direction_Correct": 91,
+      "Event_And_Direction_Per_Warning": 0.4690721649484536,
+      "Event_And_Direction_Recall": 0.1192660550458715,
+      "Direction_Accuracy_On_True_Warnings": 0.5796178343949044,
+      "Predicted_Up_Rate": 0.8045112781954887
+    },
+    {
+      "Alert_Tier": "Strong",
+      "Rows": 1064,
+      "Actual_Events": 763,
+      "Warnings": 86,
+      "Event_TP": 68,
+      "Event_FP": 18,
+      "Event_FN": 695,
+      "Event_Precision": 0.7906976744186046,
+      "Event_Recall": 0.0891218872870249,
+      "Event_F1": 0.160188457008245,
+      "Event_And_Direction_Correct": 50,
+      "Event_And_Direction_Per_Warning": 0.5813953488372093,
+      "Event_And_Direction_Recall": 0.0655307994757536,
+      "Direction_Accuracy_On_True_Warnings": 0.7352941176470589,
+      "Predicted_Up_Rate": 0.8045112781954887
+    }
+  ],
+  "note": "Historical OOS performance from the evaluation pipeline; production artifacts are trained separately for inference."
+}
