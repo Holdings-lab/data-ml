@@ -9,10 +9,12 @@ from pathlib import Path
 import numpy as np
 import optuna
 import pandas as pd
+from sklearn.base import is_classifier, is_regressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 
+from shared.cluster.model import fit_embedding_pca_features, transform_embedding_pca_features
 from shared.config.schema import MarketNewsTrainingConfig
 from shared.common.utils import write_json
 
@@ -143,6 +145,41 @@ def _compute_direction_accuracy(
     return float((predicted_direction == actual_direction).mean())
 
 
+def _score_selected_features_with_time_series_cv(
+    X_train_full: pd.DataFrame,
+    y_train_full: pd.Series,
+    selected_features: list[str],
+    horizon: int,
+    config: MarketNewsTrainingConfig,
+) -> float:
+    tscv = TimeSeriesSplit(n_splits=3)
+    cv_scores = []
+
+    for train_index, valid_index in tscv.split(X_train_full):
+        purged_train_index = _purge_overlapping_train_rows(train_index, horizon)
+        if len(purged_train_index) == 0:
+            continue
+
+        X_tr = X_train_full[selected_features].iloc[purged_train_index]
+        X_va = X_train_full[selected_features].iloc[valid_index]
+        y_tr = y_train_full.iloc[purged_train_index]
+        y_va = y_train_full.iloc[valid_index]
+
+        model = _build_feature_selector_model(config)
+        model.fit(X_tr, y_tr)
+
+        direction_accuracy = _compute_direction_accuracy(
+            model.predict(X_va),
+            y_va.to_numpy(),
+        )
+        cv_scores.append(direction_accuracy)
+
+    if not cv_scores:
+        raise ValueError(f"Could not compute CV score for horizon={horizon}.")
+
+    return float(np.mean(cv_scores))
+
+
 def select_features_for_horizon(
     feature_df: pd.DataFrame,
     candidate_feature_columns: list[str],
@@ -177,32 +214,64 @@ def select_features_for_horizon(
         .tolist()
     )
 
-    tscv = TimeSeriesSplit(n_splits=3)
-    cv_scores = []
+    return current_top_features, _score_selected_features_with_time_series_cv(
+        X_train_full,
+        y_train_full,
+        current_top_features,
+        horizon,
+        config,
+    )
 
-    for train_index, valid_index in tscv.split(X_train_full):
-        purged_train_index = _purge_overlapping_train_rows(train_index, horizon)
-        if len(purged_train_index) == 0:
-            continue
 
-        X_tr = X_train_full[current_top_features].iloc[purged_train_index]
-        X_va = X_train_full[current_top_features].iloc[valid_index]
-        y_tr = y_train_full.iloc[purged_train_index]
-        y_va = y_train_full.iloc[valid_index]
+def select_fixed_plus_top_features_for_horizon(
+    feature_df: pd.DataFrame,
+    fixed_feature_columns: list[str],
+    selectable_feature_columns: list[str],
+    selectable_top_feature_count: int,
+    horizon: int,
+    config: MarketNewsTrainingConfig,
+) -> tuple[list[str], list[str], float]:
+    candidate_feature_columns = list(
+        dict.fromkeys(fixed_feature_columns + selectable_feature_columns)
+    )
+    supervised = build_supervised_frame(feature_df, candidate_feature_columns, horizon)
+    if len(supervised) < 200:
+        raise ValueError(f"Not enough rows to evaluate horizon={horizon}.")
 
-        model = _build_feature_selector_model(config)
-        model.fit(X_tr, y_tr)
+    split_index = int(len(supervised) * config.train_ratio)
+    X_train_full = supervised[candidate_feature_columns].iloc[:split_index]
+    y_train_full = supervised["target_logret"].iloc[:split_index]
 
-        direction_accuracy = _compute_direction_accuracy(
-            model.predict(X_va),
-            y_va.to_numpy(),
+    if X_train_full.empty or y_train_full.empty:
+        raise ValueError(f"Empty training split for horizon={horizon}.")
+
+    if selectable_top_feature_count <= 0 or not selectable_feature_columns:
+        top_selectable_features = []
+    else:
+        selector = _build_feature_selector_model(config)
+        selector.fit(X_train_full, y_train_full)
+
+        importances = pd.Series(selector.feature_importances_, index=candidate_feature_columns)
+        top_selectable_features = (
+            importances.loc[selectable_feature_columns]
+            .sort_values(ascending=False)
+            .head(selectable_top_feature_count)
+            .index
+            .tolist()
         )
-        cv_scores.append(direction_accuracy)
+    selected_features = list(dict.fromkeys(fixed_feature_columns + top_selectable_features))
 
-    if not cv_scores:
-        raise ValueError(f"Could not compute CV score for horizon={horizon}.")
-
-    return current_top_features, float(np.mean(cv_scores))
+    return (
+        selected_features,
+        top_selectable_features,
+        _score_selected_features_with_time_series_cv(
+            X_train_full,
+            y_train_full,
+            selected_features,
+            horizon,
+            config,
+        ),
+    )
 
 
 def select_best_horizon_and_features(
@@ -331,6 +400,22 @@ def evaluate_model(
         np.mean(np.abs((future_price - baseline_future_price) / future_price)) * 100
     )
 
+    conf_cutoff = float(np.quantile(np.abs(predicted_logret), 0.7))
+    high_conf_mask = np.abs(predicted_logret) >= conf_cutoff
+    long_mask = high_conf_mask & (predicted_logret > 0)
+    short_mask = high_conf_mask & (predicted_logret < 0)
+
+    long_count = int(long_mask.sum())
+    short_count = int(short_mask.sum())
+    high_conf_long_accuracy: float | None = (
+        float((future_price[long_mask] > current_price[long_mask]).mean())
+        if long_count > 0 else None
+    )
+    high_conf_short_accuracy: float | None = (
+        float((future_price[short_mask] < current_price[short_mask]).mean())
+        if short_count > 0 else None
+    )
+
     metrics = {
         "mae": mae,
         "rmse": rmse,
@@ -340,6 +425,11 @@ def evaluate_model(
         "baseline_mae": baseline_mae,
         "baseline_rmse": baseline_rmse,
         "baseline_mape": baseline_mape,
+        "high_conf_threshold": conf_cutoff,
+        "high_conf_long_accuracy": high_conf_long_accuracy,
+        "high_conf_long_count": long_count,
+        "high_conf_short_accuracy": high_conf_short_accuracy,
+        "high_conf_short_count": short_count,
     }
 
     predictions = pd.DataFrame(
@@ -407,6 +497,26 @@ def _to_serializable_config(config: MarketNewsTrainingConfig) -> dict:
     }
 
 
+def _save_xgboost_model_with_estimator_type(
+    model: XGBRegressor,
+    output_path: Path,
+) -> None:
+    """
+    Save XGBoost sklearn wrappers with a compatibility fallback for recent
+    sklearn/xgboost combinations that omit `_estimator_type` on the instance.
+    """
+    if not hasattr(model, "_estimator_type"):
+        if is_regressor(model):
+            model._estimator_type = "regressor"
+        elif is_classifier(model):
+            model._estimator_type = "classifier"
+        else:
+            raise TypeError("Could not determine estimator type before saving XGBoost model.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save_model(str(output_path))
+
+
 def _fit_and_evaluate_supervised_experiment(
     experiment_name: str,
     supervised_frame: pd.DataFrame,
@@ -414,11 +524,15 @@ def _fit_and_evaluate_supervised_experiment(
     horizon: int,
     horizon_score: float | None,
     config: MarketNewsTrainingConfig,
+    embedding_columns_for_pca: list[str] | None = None,
+    n_embedding_pca_components: int = 5,
 ) -> tuple[dict, pd.DataFrame, XGBRegressor]:
     """
     이미 준비된 supervised frame을 받아 최종 튜닝, 학습, 평가를 수행한다.
 
     일반 실험과 aligned 비교 실험이 같은 학습 코드를 공유하도록 분리했다.
+    embedding_columns_for_pca가 주어지면, train 구간에서만 PCA를 fit하고
+    test 구간에는 transform만 적용해 leakage를 방지한다.
     """
     split_index = int(len(supervised_frame) * config.train_ratio)
     train_frame = supervised_frame.iloc[:split_index].copy()
@@ -430,8 +544,30 @@ def _fit_and_evaluate_supervised_experiment(
             "Check input data coverage."
         )
 
+    active_features = list(selected_features)
+    embedding_pca_payload: dict | None = None
+
+    if embedding_columns_for_pca:
+        train_emb = train_frame[embedding_columns_for_pca].to_numpy(dtype=float)
+        emb_pc_vectors, embedding_pca_payload = fit_embedding_pca_features(
+            train_emb,
+            source_columns=embedding_columns_for_pca,
+            n_components=n_embedding_pca_components,
+        )
+        pc_columns: list[str] = embedding_pca_payload["feature_columns"]
+
+        for i, col in enumerate(pc_columns):
+            train_frame[col] = emb_pc_vectors[:, i]
+
+        test_emb = test_frame[embedding_columns_for_pca].to_numpy(dtype=float)
+        test_pc_vectors = transform_embedding_pca_features(test_emb, embedding_pca_payload)
+        for i, col in enumerate(pc_columns):
+            test_frame[col] = test_pc_vectors[:, i]
+
+        active_features = active_features + pc_columns
+
     best_params = optimize_model_hyperparameters(
-        train_frame[selected_features],
+        train_frame[active_features],
         train_frame["target_logret"],
         horizon,
         config,
@@ -443,17 +579,17 @@ def _fit_and_evaluate_supervised_experiment(
         tree_method="hist",
         objective="reg:squarederror",
     )
-    final_model.fit(train_frame[selected_features], train_frame["target_logret"])
+    final_model.fit(train_frame[active_features], train_frame["target_logret"])
 
-    metrics, predictions = evaluate_model(final_model, test_frame, selected_features)
-    metadata = {
+    metrics, predictions = evaluate_model(final_model, test_frame, active_features)
+    metadata: dict = {
         "experiment_name": experiment_name,
         "best_horizon": int(horizon),
         "best_horizon_direction_score": (
             None if horizon_score is None else float(horizon_score)
         ),
-        "selected_feature_count": len(selected_features),
-        "selected_features": selected_features,
+        "selected_feature_count": len(active_features),
+        "selected_features": active_features,
         "feature_frame_start_date": _serialize_timestamp(supervised_frame["Date"].iloc[0]),
         "feature_frame_end_date": _serialize_timestamp(supervised_frame["Date"].iloc[-1]),
         "train_rows": int(len(train_frame)),
@@ -464,6 +600,8 @@ def _fit_and_evaluate_supervised_experiment(
         "test_end_date": _serialize_timestamp(test_frame["Date"].iloc[-1]),
         "metrics": metrics,
     }
+    if embedding_pca_payload is not None:
+        metadata["embedding_pca"] = embedding_pca_payload
     return metadata, predictions, final_model
 
 
@@ -478,6 +616,11 @@ def run_training_experiment(
     config: MarketNewsTrainingConfig,
     forced_horizon: int | None = None,
     forced_selected_features: list[str] | None = None,
+    fixed_selected_features: list[str] | None = None,
+    selectable_feature_columns: list[str] | None = None,
+    selectable_top_feature_count: int | None = None,
+    embedding_columns_for_pca: list[str] | None = None,
+    n_embedding_pca_components: int = 5,
     min_date: str | pd.Timestamp | None = None,
     persist_artifacts: bool = True,
 ) -> dict:
@@ -492,6 +635,32 @@ def run_training_experiment(
 
     if forced_selected_features is not None and forced_horizon is None:
         raise ValueError("forced_selected_features can only be used together with forced_horizon.")
+    has_fixed_plus_top_selection = any(
+        value is not None
+        for value in (
+            fixed_selected_features,
+            selectable_feature_columns,
+            selectable_top_feature_count,
+        )
+    )
+    if forced_selected_features is not None and has_fixed_plus_top_selection:
+        raise ValueError(
+            "forced_selected_features cannot be combined with fixed plus top feature selection."
+        )
+    if has_fixed_plus_top_selection:
+        if (
+            fixed_selected_features is None
+            or selectable_feature_columns is None
+            or selectable_top_feature_count is None
+        ):
+            raise ValueError(
+                "fixed_selected_features, selectable_feature_columns, and "
+                "selectable_top_feature_count must be provided together."
+            )
+        if forced_horizon is None:
+            raise ValueError(
+                "fixed plus top feature selection can only be used together with forced_horizon."
+            )
 
     if forced_selected_features is not None:
         best_horizon = int(forced_horizon)
@@ -505,7 +674,31 @@ def run_training_experiment(
             )
         horizon_score = None
         horizon_selection_mode = "fixed"
-        feature_selection_mode = "fixed_regression_style"
+        feature_selection_mode = (
+            "fixed_plus_embedding_pca" if embedding_columns_for_pca else "fixed_regression_style"
+        )
+        selected_selectable_features: list[str] = []
+    elif has_fixed_plus_top_selection:
+        best_horizon = int(forced_horizon)
+        best_features, selected_selectable_features, horizon_score = (
+            select_fixed_plus_top_features_for_horizon(
+                filtered_feature_df,
+                list(fixed_selected_features),
+                list(selectable_feature_columns),
+                int(selectable_top_feature_count),
+                best_horizon,
+                config,
+            )
+        )
+        missing_columns = [
+            column for column in best_features if column not in filtered_feature_df.columns
+        ]
+        if missing_columns:
+            raise ValueError(
+                f"Selected feature columns are missing from {experiment_name}: {missing_columns}"
+            )
+        horizon_selection_mode = "fixed"
+        feature_selection_mode = "fixed_plus_top_selectable"
     elif forced_horizon is None:
         best_horizon, best_features, horizon_score = select_best_horizon_and_features(
             filtered_feature_df,
@@ -514,6 +707,7 @@ def run_training_experiment(
         )
         horizon_selection_mode = "best_of_candidates"
         feature_selection_mode = "model_importance_top_k"
+        selected_selectable_features = []
     else:
         best_horizon = int(forced_horizon)
         best_features, horizon_score = select_features_for_horizon(
@@ -524,6 +718,7 @@ def run_training_experiment(
         )
         horizon_selection_mode = "fixed"
         feature_selection_mode = "model_importance_top_k"
+        selected_selectable_features = []
 
     supervised_frame = build_supervised_frame(
         filtered_feature_df,
@@ -537,23 +732,32 @@ def run_training_experiment(
         horizon=best_horizon,
         horizon_score=horizon_score,
         config=config,
+        embedding_columns_for_pca=embedding_columns_for_pca,
+        n_embedding_pca_components=n_embedding_pca_components,
     )
     metadata["config"] = _to_serializable_config(config)
     metadata["comparison_min_date"] = _serialize_timestamp(min_date)
     metadata["horizon_selection_mode"] = horizon_selection_mode
     metadata["feature_selection_mode"] = feature_selection_mode
+    if has_fixed_plus_top_selection:
+        metadata["fixed_feature_count"] = len(fixed_selected_features)
+        metadata["selectable_feature_count"] = len(selectable_feature_columns)
+        metadata["selectable_top_feature_count"] = int(selectable_top_feature_count)
+        metadata["selected_selectable_features"] = selected_selectable_features
 
     if persist_artifacts:
         if training_frame_output_path is not None:
+            training_frame_output_path.parent.mkdir(parents=True, exist_ok=True)
             supervised_frame.to_csv(
                 training_frame_output_path,
                 index=False,
                 encoding="utf-8-sig",
             )
         if predictions_output_path is not None:
+            predictions_output_path.parent.mkdir(parents=True, exist_ok=True)
             predictions.to_csv(predictions_output_path, index=False, encoding="utf-8-sig")
         if model_output_path is not None:
-            final_model.save_model(str(model_output_path))
+            _save_xgboost_model_with_estimator_type(final_model, model_output_path)
         if metadata_output_path is not None:
             write_json(metadata, metadata_output_path)
 
@@ -670,6 +874,11 @@ def run_aligned_horizon_comparison_suite(
     config: MarketNewsTrainingConfig,
     forced_market_only_features: list[str] | None = None,
     forced_market_news_features: list[str] | None = None,
+    fixed_market_news_features: list[str] | None = None,
+    selectable_market_news_features: list[str] | None = None,
+    selectable_market_news_top_feature_count: int | None = None,
+    market_news_embedding_columns_for_pca: list[str] | None = None,
+    market_news_n_embedding_pca_components: int = 5,
 ) -> tuple[pd.DataFrame, dict]:
     """
     뉴스 커버리지가 실제로 존재하는 기간만 남기고,
@@ -709,15 +918,35 @@ def run_aligned_horizon_comparison_suite(
                 market_only_score = None
 
             if forced_market_news_features is None:
-                market_news_features, market_news_score = select_features_for_horizon(
-                    filtered_market_news_df,
-                    market_news_feature_columns,
-                    horizon,
-                    config,
-                )
+                if (
+                    fixed_market_news_features is not None
+                    and selectable_market_news_features is not None
+                    and selectable_market_news_top_feature_count is not None
+                ):
+                    (
+                        market_news_features,
+                        selected_market_news_selectable_features,
+                        market_news_score,
+                    ) = select_fixed_plus_top_features_for_horizon(
+                        filtered_market_news_df,
+                        fixed_market_news_features,
+                        selectable_market_news_features,
+                        selectable_market_news_top_feature_count,
+                        horizon,
+                        config,
+                    )
+                else:
+                    market_news_features, market_news_score = select_features_for_horizon(
+                        filtered_market_news_df,
+                        market_news_feature_columns,
+                        horizon,
+                        config,
+                    )
+                    selected_market_news_selectable_features = []
             else:
                 market_news_features = list(forced_market_news_features)
                 market_news_score = None
+                selected_market_news_selectable_features = []
 
             market_only_supervised = build_supervised_frame(
                 filtered_market_only_df,
@@ -749,6 +978,8 @@ def run_aligned_horizon_comparison_suite(
                 horizon=horizon,
                 horizon_score=market_news_score,
                 config=config,
+                embedding_columns_for_pca=market_news_embedding_columns_for_pca,
+                n_embedding_pca_components=market_news_n_embedding_pca_components,
             )
         except ValueError as exc:
             skipped_horizons.append(
@@ -767,8 +998,28 @@ def run_aligned_horizon_comparison_suite(
         market_news_result["horizon_selection_mode"] = "shared_fixed"
         if forced_market_only_features is not None:
             market_only_result["feature_selection_mode"] = "fixed_regression_style"
+        else:
+            market_only_result["feature_selection_mode"] = "model_importance_top_k"
         if forced_market_news_features is not None:
-            market_news_result["feature_selection_mode"] = "fixed_regression_style"
+            market_news_result["feature_selection_mode"] = (
+                "fixed_plus_embedding_pca"
+                if market_news_embedding_columns_for_pca
+                else "fixed_regression_style"
+            )
+        elif fixed_market_news_features is not None:
+            market_news_result["feature_selection_mode"] = "fixed_plus_top_selectable"
+            market_news_result["fixed_feature_count"] = len(fixed_market_news_features)
+            market_news_result["selectable_feature_count"] = len(
+                selectable_market_news_features or []
+            )
+            market_news_result["selectable_top_feature_count"] = (
+                selectable_market_news_top_feature_count
+            )
+            market_news_result["selected_selectable_features"] = (
+                selected_market_news_selectable_features
+            )
+        else:
+            market_news_result["feature_selection_mode"] = "model_importance_top_k"
 
         pair_df, pair_payload = build_comparison_artifacts(
             market_only_result,
@@ -815,3 +1066,95 @@ def run_aligned_horizon_comparison_suite(
         "summary": summary,
     }
     return comparison_df, payload
+
+
+def run_mean_return_baseline(
+    feature_df: pd.DataFrame,
+    config: MarketNewsTrainingConfig,
+) -> dict:
+    """
+    훈련 구간 평균 로그수익률을 테스트 전체에 상수로 예측하는 naive baseline.
+
+    "항상 역사적 평균만큼 오른다"고 예측하는 전략의 방향 정확도를 측정한다.
+    XGBoost 모델과 동일한 horizon·train_ratio로 분할해 직접 비교가 가능하다.
+    """
+    horizon = config.regression_style_fixed_horizon
+    supervised = build_supervised_frame(feature_df, [], horizon)
+
+    split_index = int(len(supervised) * config.train_ratio)
+    train_frame = supervised.iloc[:split_index].copy()
+    test_frame = supervised.iloc[split_index:].copy()
+
+    mean_train_logret = float(train_frame["target_logret"].mean())
+
+    predicted_logret = np.full(len(test_frame), mean_train_logret)
+    current_price = test_frame["target_price"].to_numpy()
+    future_price = test_frame["target_future_price"].to_numpy()
+    predicted_future_price = current_price * np.exp(predicted_logret / 100.0)
+
+    mae = float(mean_absolute_error(future_price, predicted_future_price))
+    rmse = float(np.sqrt(mean_squared_error(future_price, predicted_future_price)))
+    r2 = float(r2_score(future_price, predicted_future_price))
+    direction_accuracy = _compute_direction_accuracy(
+        predicted_future_price - current_price,
+        future_price - current_price,
+    )
+    mape = float(np.mean(np.abs((future_price - predicted_future_price) / future_price)) * 100)
+
+    baseline_future_price = current_price.copy()
+    baseline_rmse = float(np.sqrt(mean_squared_error(future_price, baseline_future_price)))
+    baseline_mae = float(mean_absolute_error(future_price, baseline_future_price))
+    baseline_mape = float(
+        np.mean(np.abs((future_price - baseline_future_price) / future_price)) * 100
+    )
+
+    actual_logret = test_frame["target_logret"].to_numpy()
+    actual_downside_count = int((actual_logret < 0).sum())
+    actual_upside_count = int((actual_logret >= 0).sum())
+    predicted_down_count = int((predicted_logret < 0).sum())
+    predicted_up_count = int((predicted_logret >= 0).sum())
+    predicted_up_precision: float | None = (
+        direction_accuracy if predicted_up_count > 0 else None
+    )
+
+    metrics = {
+        "mae": mae,
+        "rmse": rmse,
+        "r2_score": r2,
+        "direction_accuracy": direction_accuracy,
+        "mape": mape,
+        "actual_downside_count": actual_downside_count,
+        "actual_upside_count": actual_upside_count,
+        "predicted_down_count": predicted_down_count,
+        "predicted_down_rate": float(predicted_down_count / len(test_frame)),
+        "predicted_down_precision": None,
+        "predicted_up_count": predicted_up_count,
+        "predicted_up_rate": float(predicted_up_count / len(test_frame)),
+        "predicted_up_precision": predicted_up_precision,
+        "mean_train_logret": mean_train_logret,
+        "baseline_mae": baseline_mae,
+        "baseline_rmse": baseline_rmse,
+        "baseline_mape": baseline_mape,
+        "high_conf_threshold": None,
+        "high_conf_long_accuracy": None,
+        "high_conf_short_accuracy": None,
+        "high_conf_long_count": None,
+        "high_conf_short_count": None,
+    }
+
+    return {
+        "experiment_name": "mean_return_baseline",
+        "best_horizon": int(horizon),
+        "best_horizon_direction_score": None,
+        "selected_feature_count": 0,
+        "selected_features": [],
+        "feature_frame_start_date": _serialize_timestamp(supervised["Date"].iloc[0]),
+        "feature_frame_end_date": _serialize_timestamp(supervised["Date"].iloc[-1]),
+        "train_rows": int(len(train_frame)),
+        "test_rows": int(len(test_frame)),
+        "train_start_date": _serialize_timestamp(train_frame["Date"].iloc[0]),
+        "train_end_date": _serialize_timestamp(train_frame["Date"].iloc[-1]),
+        "test_start_date": _serialize_timestamp(test_frame["Date"].iloc[0]),
+        "test_end_date": _serialize_timestamp(test_frame["Date"].iloc[-1]),
+        "metrics": metrics,
+    }

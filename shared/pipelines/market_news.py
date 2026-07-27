@@ -20,12 +20,30 @@ import pandas as pd
 
 from shared.common.utils import write_json
 from shared.config.schema import MarketNewsTrainingConfig
-from shared.market.data import build_market_feature_frame, download_market_data
+from shared.market.data import (
+    build_market_feature_frame,
+    download_market_data,
+    supplementary_ticker_feature_columns,
+)
 from shared.news.features import build_daily_news_feature_table, load_news_source_table
 from shared.news.merge import merge_news_features_into_market_frame
+from shared.cluster import (
+    CLUSTER_BASE_FEATURE_COLS,
+    CLUSTER_EMBEDDING_PCA_COMPONENTS,
+    FIXED_THRESHOLDS,
+    VOLATILITY_LABELS,
+    build_predicted_return_cluster_dataset,
+    build_predicted_return_cluster_summary,
+    build_representative_embedding_news,
+    fit_news_centroids,
+    infer_embedding_feature_columns,
+    rank_cluster_features,
+    save_cluster_visualization,
+)
 from shared.training.xgboost_pipeline import (
     build_comparison_artifacts,
     run_aligned_horizon_comparison_suite,
+    run_mean_return_baseline,
     run_training_experiment,
     seed_everything,
 )
@@ -39,34 +57,18 @@ __all__ = [
     "merge_news_features_into_market_frame",
     "run_market_news_training_pipeline",
     "run_aligned_horizon_comparison_suite",
+    "run_mean_return_baseline",
     "run_training_experiment",
     "seed_everything",
 ]
 
+def _write_dataframe_csv(df: pd.DataFrame, output_path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-REGRESSION_STYLE_MARKET_FEATURE_COLUMNS = [
-    "ret_5",
-    "ret_accel",
-    "dist_to_ma5",
-    "bb_pos",
-    "rsi_14",
-    "vol_shock",
-    "vix_z_score_5",
-    "drawdown",
-    "vol_ratio",
-    "rel_strength_5",
-    "uup_shock_5",
-    "tlt_shock_5",
-    "hyg_ret",
-    "target_spy_rel_ret",
-]
 
-REGRESSION_STYLE_NEWS_FEATURE_COLUMNS = [
-    "sentiment_gap",
-    "body_sentiment_gap",
-    "sentiment_shock",
-    "body_sentiment_score",
-]
+def _dedupe_feature_columns(columns: list[str]) -> list[str]:
+    return list(dict.fromkeys(columns))
 
 
 def _require_feature_columns(
@@ -82,7 +84,7 @@ def _require_feature_columns(
         raise ValueError(
             f"{source_name} is missing required regression-style feature columns: {missing_columns}"
         )
-    return candidate_columns.copy()
+    return _dedupe_feature_columns(candidate_columns)
 
 
 def _resolve_aligned_comparison_start_date(
@@ -141,10 +143,9 @@ def run_market_news_training_pipeline(
     # 1) 크롤러 산출물 로드 후, 문서 단위 뉴스를 거래일 기준 숫자 피처로 압축한다.
     news_source_df = load_news_source_table(config.news_input_path)
     daily_news_features = build_daily_news_feature_table(news_source_df)
-    daily_news_features.to_csv(
+    _write_dataframe_csv(
+        daily_news_features,
         config.daily_news_features_output_path,
-        index=False,
-        encoding="utf-8-sig",
     )
 
     # 2) 가격/거시 자산 시계열로부터 공통 시장 피처 프레임을 만든다.
@@ -152,26 +153,39 @@ def run_market_news_training_pipeline(
     market_feature_df, _market_feature_columns = build_market_feature_frame(
         raw_market_df,
         config.target_ticker,
+        supplementary_tickers=config.macro_tickers,
     )
-    regression_market_feature_columns = _require_feature_columns(
+    configured_market_feature_columns = _require_feature_columns(
         market_feature_df,
-        REGRESSION_STYLE_MARKET_FEATURE_COLUMNS,
+        list(config.market_feature_columns),
         "market feature frame",
+    )
+    supplementary_market_feature_columns = _require_feature_columns(
+        market_feature_df,
+        supplementary_ticker_feature_columns(
+            config.macro_tickers,
+            config.supplementary_ticker_feature_suffixes,
+        ),
+        "supplementary market feature frame",
+    )
+    model_market_feature_columns = _dedupe_feature_columns(
+        configured_market_feature_columns + supplementary_market_feature_columns
     )
 
     # 3) team regression script와 같은 고정 horizon/고정 피처로 baseline 실험을 수행한다.
-    market_only_result = run_training_experiment(
-        experiment_name="market_only",
-        feature_df=market_feature_df,
-        candidate_feature_columns=regression_market_feature_columns,
-        training_frame_output_path=config.market_only_training_frame_output_path,
-        predictions_output_path=config.market_only_predictions_output_path,
-        model_output_path=config.market_only_model_output_path,
-        metadata_output_path=config.market_only_metadata_output_path,
-        config=config,
-        forced_horizon=config.regression_style_fixed_horizon,
-        forced_selected_features=regression_market_feature_columns,
-    )
+    if not config.market_news_only:
+        market_only_result = run_training_experiment(
+            experiment_name="market_only",
+            feature_df=market_feature_df,
+            candidate_feature_columns=model_market_feature_columns,
+            training_frame_output_path=config.market_only_training_frame_output_path,
+            predictions_output_path=config.market_only_predictions_output_path,
+            model_output_path=config.market_only_model_output_path,
+            metadata_output_path=config.market_only_metadata_output_path,
+            config=config,
+            forced_horizon=config.regression_style_fixed_horizon,
+            forced_selected_features=model_market_feature_columns,
+        )
 
     # 4) team regression script 방식으로 뉴스 피처를 병합하고, 같은 horizon/피처 구조로 재학습한다.
     merged_feature_df, _news_feature_columns = merge_news_features_into_market_frame(
@@ -180,14 +194,25 @@ def run_market_news_training_pipeline(
     )
     regression_news_feature_columns = _require_feature_columns(
         merged_feature_df,
-        REGRESSION_STYLE_NEWS_FEATURE_COLUMNS,
+        _news_feature_columns,
         "market+news feature frame",
+    )
+    embedding_news_feature_columns = [
+        column for column in regression_news_feature_columns if column.startswith("body_emb_")
+    ]
+    scalar_news_feature_columns = [
+        column
+        for column in regression_news_feature_columns
+        if not column.startswith("body_emb_")
+    ]
+    fixed_market_news_feature_columns = _dedupe_feature_columns(
+        model_market_feature_columns + scalar_news_feature_columns
     )
     market_news_result = run_training_experiment(
         experiment_name="market_news",
         feature_df=merged_feature_df,
-        candidate_feature_columns=(
-            regression_market_feature_columns + regression_news_feature_columns
+        candidate_feature_columns=_dedupe_feature_columns(
+            model_market_feature_columns + regression_news_feature_columns
         ),
         training_frame_output_path=config.merged_training_frame_output_path,
         predictions_output_path=config.predictions_output_path,
@@ -195,43 +220,179 @@ def run_market_news_training_pipeline(
         metadata_output_path=config.metadata_output_path,
         config=config,
         forced_horizon=config.regression_style_fixed_horizon,
-        forced_selected_features=(
-            regression_market_feature_columns + regression_news_feature_columns
-        ),
+        forced_selected_features=fixed_market_news_feature_columns,
+        embedding_columns_for_pca=embedding_news_feature_columns,
+        n_embedding_pca_components=config.training_embedding_pca_components,
     )
 
-    # 5) 뉴스 커버리지가 실제로 존재하는 기간 + 동일 horizon 기준의 공정 비교 결과를 만든다.
-    aligned_comparison_start_date = _resolve_aligned_comparison_start_date(
-        merged_feature_df,
-        config,
-    )
-    aligned_comparison_df, aligned_comparison_payload = run_aligned_horizon_comparison_suite(
-        market_only_feature_df=market_feature_df,
-        market_news_feature_df=merged_feature_df,
-        market_only_feature_columns=regression_market_feature_columns,
-        market_news_feature_columns=(
-            regression_market_feature_columns + regression_news_feature_columns
-        ),
-        aligned_start_date=aligned_comparison_start_date,
-        config=config,
-        forced_market_only_features=regression_market_feature_columns,
-        forced_market_news_features=(
-            regression_market_feature_columns + regression_news_feature_columns
-        ),
-    )
-    aligned_comparison_df.to_csv(
-        config.aligned_comparison_output_path,
-        index=False,
-        encoding="utf-8-sig",
-    )
-    write_json(aligned_comparison_payload, config.aligned_comparison_metadata_output_path)
+    # 5a) 훈련 구간 평균 수익률을 상수로 예측하는 naive baseline — market_news_only 여부와 무관하게 항상 실행.
+    mean_return_baseline_result = run_mean_return_baseline(merged_feature_df, config)
 
-    # 6) 기존 best-horizon 결과도 그대로 비교표 형태로 저장한다.
-    comparison_df, comparison_payload = build_comparison_artifacts(
-        market_only_result,
-        market_news_result,
+    if config.market_news_only:
+        comparison_payload: dict = {
+            "mean_return_baseline": mean_return_baseline_result,
+            "market_news": market_news_result,
+        }
+    else:
+        # 5) 뉴스 커버리지가 실제로 존재하는 기간 + 동일 horizon 기준의 공정 비교 결과를 만든다.
+        aligned_comparison_start_date = _resolve_aligned_comparison_start_date(
+            merged_feature_df,
+            config,
+        )
+        aligned_comparison_df, aligned_comparison_payload = run_aligned_horizon_comparison_suite(
+            market_only_feature_df=market_feature_df,
+            market_news_feature_df=merged_feature_df,
+            market_only_feature_columns=model_market_feature_columns,
+            market_news_feature_columns=_dedupe_feature_columns(
+                model_market_feature_columns + regression_news_feature_columns
+            ),
+            aligned_start_date=aligned_comparison_start_date,
+            config=config,
+            forced_market_only_features=model_market_feature_columns,
+            forced_market_news_features=fixed_market_news_feature_columns,
+            market_news_embedding_columns_for_pca=embedding_news_feature_columns,
+            market_news_n_embedding_pca_components=config.training_embedding_pca_components,
+        )
+        _write_dataframe_csv(
+            aligned_comparison_df,
+            config.aligned_comparison_output_path,
+        )
+        write_json(aligned_comparison_payload, config.aligned_comparison_metadata_output_path)
+
+        # 6) 기존 best-horizon 결과도 그대로 비교표 형태로 저장한다.
+        comparison_df, comparison_payload = build_comparison_artifacts(
+            market_only_result,
+            market_news_result,
+        )
+        _write_dataframe_csv(comparison_df, config.comparison_output_path)
+        comparison_payload["mean_return_baseline"] = mean_return_baseline_result
+        comparison_payload["aligned_shared_period_comparison"] = aligned_comparison_payload
+
+    # 7) market_news 회귀 모델의 예측 수익률을 고정 구간으로 나누고 profile을 요약한다.
+    cluster_feature_frame = pd.read_csv(config.merged_training_frame_output_path)
+    cluster_base_feature_columns = _require_feature_columns(
+        cluster_feature_frame,
+        CLUSTER_BASE_FEATURE_COLS,
+        "cluster feature frame",
     )
-    comparison_df.to_csv(config.comparison_output_path, index=False, encoding="utf-8-sig")
-    comparison_payload["aligned_shared_period_comparison"] = aligned_comparison_payload
+    cluster_embedding_feature_columns = _require_feature_columns(
+        cluster_feature_frame,
+        infer_embedding_feature_columns(cluster_feature_frame),
+        "cluster embedding feature frame",
+    )
+    market_news_predictions = pd.read_csv(config.predictions_output_path)
+    (
+        prediction_vectors,
+        prediction_labels,
+        prediction_dates,
+        cluster_feature_columns,
+        embedding_pca_payload,
+        prediction_records,
+    ) = build_predicted_return_cluster_dataset(
+        cluster_feature_frame,
+        cluster_feature_frame,
+        market_news_predictions,
+        window_days=config.cluster_window_days,
+        base_feature_columns=cluster_base_feature_columns,
+        embedding_feature_columns=cluster_embedding_feature_columns,
+        n_components=CLUSTER_EMBEDDING_PCA_COMPONENTS,
+        pca_fit_ratio=config.train_ratio,
+    )
+    prediction_centroids, prediction_counts, profile_scaler = fit_news_centroids(
+        prediction_vectors,
+        prediction_labels,
+    )
+    prediction_summary = build_predicted_return_cluster_summary(
+        dates=prediction_dates,
+        labels=prediction_labels,
+        prediction_records=prediction_records,
+        vectors=prediction_vectors,
+        feature_columns=cluster_feature_columns,
+    )
+    representative_news = build_representative_embedding_news(
+        centroids=prediction_centroids,
+        counts=prediction_counts,
+        scaler=profile_scaler,
+        feature_columns=cluster_feature_columns,
+        embedding_pca=embedding_pca_payload,
+        source_news_df=news_source_df,
+        top_n=5,
+    )
+    for group in prediction_summary:
+        group["representative_embedding_news"] = representative_news.get(
+            group["label"],
+            [],
+        )
+    feature_rankings = rank_cluster_features(
+        centroids=prediction_centroids,
+        scaler=profile_scaler,
+        feature_columns=cluster_feature_columns,
+        top_n=10,
+    )
+    for group in prediction_summary:
+        group["profile_feature_ranking"] = feature_rankings.get(
+            group["label"],
+            [],
+        )
+
+    cluster_model_payload: dict = {
+        "model_kind": "predicted_forward_return_profile_clusters",
+        "target": "market_news_model_predicted_forward_return",
+        "prediction_summary_scope": "market_news_test_predictions",
+        "centroids": prediction_centroids.tolist(),
+        "scaler_mean": profile_scaler.mean_.tolist(),
+        "scaler_scale": profile_scaler.scale_.tolist(),
+        "feature_columns": cluster_feature_columns,
+        "base_feature_columns": cluster_base_feature_columns,
+        "embedding_pca": embedding_pca_payload,
+        "source_model": {
+            "experiment_name": market_news_result.get("experiment_name"),
+            "best_horizon": market_news_result.get("best_horizon"),
+            "metrics": market_news_result.get("metrics", {}),
+        },
+        "labels": VOLATILITY_LABELS,
+        "fixed_thresholds": list(FIXED_THRESHOLDS),
+        "horizon": market_news_result.get("best_horizon", config.cluster_horizon),
+        "window_days": config.cluster_window_days,
+    }
+    write_json(cluster_model_payload, config.cluster_model_output_path)
+
+    cluster_report_payload: dict = {
+        "model_kind": "predicted_forward_return_profile_clusters",
+        "target": "market_news_model_predicted_forward_return",
+        "prediction_summary_scope": "market_news_test_predictions",
+        "horizon": market_news_result.get("best_horizon", config.cluster_horizon),
+        "window_days": config.cluster_window_days,
+        "labels": VOLATILITY_LABELS,
+        "fixed_thresholds": list(FIXED_THRESHOLDS),
+        "feature_columns": cluster_feature_columns,
+        "source_model_metrics": market_news_result.get("metrics", {}),
+        "representative_news_method": (
+            "Label centroid body_emb_cluster_pc* values are inverse-transformed "
+            "to the original body_emb_* space, then matched to source news by "
+            "cosine similarity."
+        ),
+        "profile_feature_ranking_method": (
+            "For each label centroid, original-scale feature values are compared "
+            "against the global profile mean and sorted by absolute z-difference."
+        ),
+        "predicted_groups": prediction_summary,
+    }
+    write_json(cluster_report_payload, config.cluster_report_output_path)
+    comparison_payload["predicted_return_cluster_report"] = cluster_report_payload
+    comparison_payload["volatility_cluster_report"] = cluster_report_payload
+
+    save_cluster_visualization(
+        vectors=prediction_vectors,
+        labels=prediction_labels,
+        counts=prediction_counts,
+        centroids=prediction_centroids,
+        scaler=profile_scaler,
+        output_path=config.cluster_visualization_output_path,
+        horizon=market_news_result.get("best_horizon", config.cluster_horizon),
+        window_days=config.cluster_window_days,
+        feature_columns=cluster_feature_columns,
+    )
+
     write_json(comparison_payload, config.comparison_metadata_output_path)
     return comparison_payload

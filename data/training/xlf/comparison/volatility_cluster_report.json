@@ -1,0 +1,855 @@
+{
+  "model_kind": "predicted_forward_return_profile_clusters",
+  "target": "market_news_model_predicted_forward_return",
+  "prediction_summary_scope": "market_news_test_predictions",
+  "horizon": 5,
+  "window_days": 5,
+  "labels": [
+    "fall_strong",
+    "fall",
+    "neutral",
+    "rise",
+    "rise_strong"
+  ],
+  "fixed_thresholds": [
+    -0.003,
+    0.0,
+    0.003,
+    0.006
+  ],
+  "feature_columns": [
+    "ret_5",
+    "vol_5",
+    "vol_ratio_5",
+    "drawdown",
+    "vix_z_score_5",
+    "vol_shock",
+    "days_since_news",
+    "news_count_lag1",
+    "negative_count_ratio_5d",
+    "title_sentiment_3d_mean",
+    "title_sentiment_5d_mean",
+    "body_sentiment_decay_5d",
+    "fomc_recent_5d",
+    "fomc_sentiment_shock",
+    "body_emb_cluster_pc1",
+    "body_emb_cluster_pc2",
+    "body_emb_cluster_pc3",
+    "body_emb_cluster_pc4",
+    "body_emb_cluster_pc5",
+    "body_emb_cluster_pc6",
+    "body_emb_cluster_pc7",
+    "body_emb_cluster_pc8",
+    "body_emb_cluster_pc9",
+    "body_emb_cluster_pc10"
+  ],
+  "source_model_metrics": {
+    "mae": 0.9195877362399304,
+    "rmse": 1.233068683571267,
+    "r2_score": 0.8954384865341961,
+    "direction_accuracy": 0.5053533190578159,
+    "mape": 1.892688055248151,
+    "baseline_mae": 0.8828041272704555,
+    "baseline_rmse": 1.161738665321644,
+    "baseline_mape": 1.8193585952737175,
+    "high_conf_threshold": 0.4205954670906067,
+    "high_conf_long_accuracy": 0.6091954022988506,
+    "high_conf_long_count": 87,
+    "high_conf_short_accuracy": 0.4528301886792453,
+    "high_conf_short_count": 53
+  },
+  "representative_news_method": "Label centroid body_emb_cluster_pc* values are inverse-transformed to the original body_emb_* space, then matched to source news by cosine similarity.",
+  "profile_feature_ranking_method": "For each label centroid, original-scale feature values are compared against the global profile mean and sorted by absolute z-difference.",
+  "predicted_groups": [
+    {
+      "label": "fall_strong",
+      "count": 63,
+      "date_range": {
+        "first": "2024-10-07",
+        "last": "2026-04-24"
+      },
+      "average_predicted_return_pct": -1.1005449862707235,
+      "min_predicted_return_pct": -4.585909843444814,
+      "max_predicted_return_pct": -0.3030121326446533,
+      "average_actual_return_pct": 0.8674833748032937,
+      "direction_accuracy": 0.3968253968253968,
+      "profile_feature_means": {
+        "ret_5": 0.0076,
+        "vol_5": 0.012,
+        "vol_ratio_5": 1.141,
+        "drawdown": -0.0518,
+        "vix_z_score_5": -0.1255,
+        "vol_shock": 0.8555,
+        "days_since_news": 2.6878,
+        "news_count_lag1": 0.5966,
+        "negative_count_ratio_5d": 0.2126,
+        "title_sentiment_3d_mean": -0.0125,
+        "title_sentiment_5d_mean": -0.0071,
+        "body_sentiment_decay_5d": -0.0467,
+        "fomc_recent_5d": 0.2138,
+        "fomc_sentiment_shock": -0.0057,
+        "body_emb_cluster_pc1": -0.0166,
+        "body_emb_cluster_pc2": -0.2238,
+        "body_emb_cluster_pc3": 0.1284,
+        "body_emb_cluster_pc4": 0.0616,
+        "body_emb_cluster_pc5": -0.4856,
+        "body_emb_cluster_pc6": 0.2114,
+        "body_emb_cluster_pc7": -0.2194,
+        "body_emb_cluster_pc8": 0.1461,
+        "body_emb_cluster_pc9": 0.2712,
+        "body_emb_cluster_pc10": -0.0315
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.659999,
+          "date": "2021-02-17",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": -0.1498480818710895,
+          "title_sentiment_score": -0.0241492632776498,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20210127.htm"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.641627,
+          "date": "2023-02-22",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.2427832431456338,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20230201.htm"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.606593,
+          "date": "2024-10-09",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.3269590735435486,
+          "title_sentiment_score": -0.0241492707282304,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240918.htm"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.590787,
+          "date": "2017-11-22",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.5802585780620575,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20171101.htm"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.585532,
+          "date": "2017-02-22",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.4818576890828571,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20170201.htm"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.051797886814804156,
+          "z_diff": -0.5703445774208804,
+          "abs_z": 0.5703445774208804
+        },
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.011978979973685952,
+          "z_diff": 0.4143172146885347,
+          "abs_z": 0.4143172146885347
+        },
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.141045375715844,
+          "z_diff": -0.3248531164625256,
+          "abs_z": 0.3248531164625256
+        },
+        {
+          "feature": "days_since_news",
+          "centroid_value": 2.687830687830688,
+          "z_diff": 0.2510505906178122,
+          "abs_z": 0.2510505906178122
+        },
+        {
+          "feature": "vol_shock",
+          "centroid_value": 0.8555477591941243,
+          "z_diff": -0.2493604359364213,
+          "abs_z": 0.2493604359364213
+        },
+        {
+          "feature": "ret_5",
+          "centroid_value": 0.007643625366122127,
+          "z_diff": 0.20424223114415618,
+          "abs_z": 0.20424223114415618
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": -0.12554208342706805,
+          "z_diff": -0.19958549139510587,
+          "abs_z": 0.19958549139510587
+        },
+        {
+          "feature": "body_emb_cluster_pc9",
+          "centroid_value": 0.2712275670181378,
+          "z_diff": 0.19724670489739102,
+          "abs_z": 0.19724670489739102
+        },
+        {
+          "feature": "fomc_sentiment_shock",
+          "centroid_value": -0.005742138556693618,
+          "z_diff": -0.18496095130094398,
+          "abs_z": 0.18496095130094398
+        },
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": 0.06162892565928825,
+          "z_diff": 0.1525342082441471,
+          "abs_z": 0.1525342082441471
+        }
+      ]
+    },
+    {
+      "label": "fall",
+      "count": 65,
+      "date_range": {
+        "first": "2024-07-02",
+        "last": "2026-04-23"
+      },
+      "average_predicted_return_pct": -0.12473519031818267,
+      "min_predicted_return_pct": -0.29793381690979004,
+      "max_predicted_return_pct": -0.0036060810089000306,
+      "average_actual_return_pct": 0.52673711251892,
+      "direction_accuracy": 0.35384615384615387,
+      "profile_feature_means": {
+        "ret_5": 0.0059,
+        "vol_5": 0.0097,
+        "vol_ratio_5": 1.1307,
+        "drawdown": -0.0381,
+        "vix_z_score_5": 0.1112,
+        "vol_shock": 0.9395,
+        "days_since_news": 2.1397,
+        "news_count_lag1": 0.6462,
+        "negative_count_ratio_5d": 0.2072,
+        "title_sentiment_3d_mean": -0.0188,
+        "title_sentiment_5d_mean": -0.0124,
+        "body_sentiment_decay_5d": -0.0174,
+        "fomc_recent_5d": 0.2767,
+        "fomc_sentiment_shock": 0.0067,
+        "body_emb_cluster_pc1": -0.0384,
+        "body_emb_cluster_pc2": -0.0462,
+        "body_emb_cluster_pc3": -0.016,
+        "body_emb_cluster_pc4": 0.0867,
+        "body_emb_cluster_pc5": -0.5092,
+        "body_emb_cluster_pc6": 0.284,
+        "body_emb_cluster_pc7": -0.4509,
+        "body_emb_cluster_pc8": 0.0578,
+        "body_emb_cluster_pc9": -0.3079,
+        "body_emb_cluster_pc10": 0.1701
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.651143,
+          "date": "2025-03-19",
+          "category": "FOMC",
+          "doc_type": "statement",
+          "title": "Federal Reserve issues FOMC statement",
+          "body_sentiment_score": 0.0086574022169625,
+          "title_sentiment_score": -0.049151599407196,
+          "link": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250319a.htm"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.628618,
+          "date": "2024-10-09",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.3269590735435486,
+          "title_sentiment_score": -0.0241492707282304,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240918.htm"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.619545,
+          "date": "2024-02-21",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.5904387159052178,
+          "title_sentiment_score": -0.0241492707282304,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240131.htm"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.611188,
+          "date": "2024-04-10",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": -0.8939237128943205,
+          "title_sentiment_score": -0.0241492707282304,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240320.htm"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.604235,
+          "date": "2020-02-06",
+          "category": "FRASER",
+          "doc_type": "\"monetary policy\" \"interest rate\"",
+          "title": "Meeting, February 6, 2020",
+          "body_sentiment_score": 0.4274679374471124,
+          "title_sentiment_score": -0.03675995208323,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/frsbog/facminutes/fac_20200206.txt"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.13072911150195,
+          "z_diff": -0.34186959073297113,
+          "abs_z": 0.34186959073297113
+        },
+        {
+          "feature": "body_emb_cluster_pc9",
+          "centroid_value": -0.307930691711124,
+          "z_diff": -0.31037234793104385,
+          "abs_z": 0.31037234793104385
+        },
+        {
+          "feature": "body_emb_cluster_pc10",
+          "centroid_value": 0.17007267828188824,
+          "z_diff": 0.2064104580628526,
+          "abs_z": 0.2064104580628526
+        },
+        {
+          "feature": "body_emb_cluster_pc8",
+          "centroid_value": 0.057766639511489276,
+          "z_diff": -0.20356900350936868,
+          "abs_z": 0.20356900350936868
+        },
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": 0.08672336792177097,
+          "z_diff": 0.17635041452838912,
+          "abs_z": 0.17635041452838912
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": -0.45087328611137784,
+          "z_diff": -0.16475251810843805,
+          "abs_z": 0.16475251810843805
+        },
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.03807396979870242,
+          "z_diff": -0.15898299990771364,
+          "abs_z": 0.15898299990771364
+        },
+        {
+          "feature": "body_emb_cluster_pc1",
+          "centroid_value": -0.038372467188442644,
+          "z_diff": -0.15848031400809542,
+          "abs_z": 0.15848031400809542
+        },
+        {
+          "feature": "fomc_sentiment_shock",
+          "centroid_value": 0.006746614849004661,
+          "z_diff": 0.15082676987493798,
+          "abs_z": 0.15082676987493798
+        },
+        {
+          "feature": "body_emb_cluster_pc5",
+          "centroid_value": -0.5092130715799568,
+          "z_diff": -0.14844328358119094,
+          "abs_z": 0.14844328358119094
+        }
+      ]
+    },
+    {
+      "label": "neutral",
+      "count": 166,
+      "date_range": {
+        "first": "2024-06-17",
+        "last": "2026-04-07"
+      },
+      "average_predicted_return_pct": 0.17291120735995674,
+      "min_predicted_return_pct": 0.0017404556274414062,
+      "max_predicted_return_pct": 0.2967953681946023,
+      "average_actual_return_pct": -0.03180681033109956,
+      "direction_accuracy": 0.5120481927710844,
+      "profile_feature_means": {
+        "ret_5": 0.0035,
+        "vol_5": 0.0091,
+        "vol_ratio_5": 1.3985,
+        "drawdown": -0.0262,
+        "vix_z_score_5": 0.1122,
+        "vol_shock": 0.9378,
+        "days_since_news": 1.9287,
+        "news_count_lag1": 0.6401,
+        "negative_count_ratio_5d": 0.255,
+        "title_sentiment_3d_mean": -0.0123,
+        "title_sentiment_5d_mean": -0.008,
+        "body_sentiment_decay_5d": -0.0333,
+        "fomc_recent_5d": 0.2692,
+        "fomc_sentiment_shock": 0.0011,
+        "body_emb_cluster_pc1": 0.1182,
+        "body_emb_cluster_pc2": -0.0513,
+        "body_emb_cluster_pc3": -0.0452,
+        "body_emb_cluster_pc4": -0.3771,
+        "body_emb_cluster_pc5": -0.3284,
+        "body_emb_cluster_pc6": 0.1942,
+        "body_emb_cluster_pc7": -0.363,
+        "body_emb_cluster_pc8": 0.3146,
+        "body_emb_cluster_pc9": 0.258,
+        "body_emb_cluster_pc10": 0.0539
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.575547,
+          "date": "2024-01-08",
+          "category": "FRASER",
+          "doc_type": "\"monetary policy\" \"interest rate\"",
+          "title": "New Year's Resolutions for Bank Regulatory Policymakers",
+          "body_sentiment_score": -0.3466762882767701,
+          "title_sentiment_score": 0.0105859860777854,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/federal reserve history/bog_members_statements/bowman20240108a.txt"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.57004,
+          "date": "2023-10-05",
+          "category": "FRASER",
+          "doc_type": "\"monetary policy\" \"interest rate\"",
+          "title": "Monetary Policy: Progress Is Not Victory",
+          "body_sentiment_score": -0.35251128873673,
+          "title_sentiment_score": -0.1900896877050399,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/frbsf/presidents/daly_20231005.txt"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.539157,
+          "date": "2019-04-01",
+          "category": "FRASER",
+          "doc_type": "\"financial stability\" risk",
+          "title": "2018 Annual Report",
+          "body_sentiment_score": 0.222308272290427,
+          "title_sentiment_score": -0.0509525183588266,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/frbkc/2018_frb_kansascity.txt"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.532111,
+          "date": "2024-02-22",
+          "category": "FRASER",
+          "doc_type": "\"monetary policy\" \"interest rate\"",
+          "title": "Economic Outlook: We Are in the Final Mile of the Marathon",
+          "body_sentiment_score": -0.016539906446798,
+          "title_sentiment_score": 0.2521073073148727,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/frbphi/presidents/harker/harker_speech_20240222.txt"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.522836,
+          "date": "2021-06-28",
+          "category": "FRASER",
+          "doc_type": "\"financial stability\" risk",
+          "title": "Parachute Pants and Central Bank Money",
+          "body_sentiment_score": 0.0710907247377491,
+          "title_sentiment_score": -0.0486785490065813,
+          "link": "https://fraser.stlouisfed.org/files/text/historical/federal reserve history/bog_members_statements/quarles20210628a.txt"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": -0.37708460884958045,
+          "z_diff": -0.26383256844142594,
+          "abs_z": 0.26383256844142594
+        },
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.026154997773912964,
+          "z_diff": 0.19827703953293507,
+          "abs_z": 0.19827703953293507
+        },
+        {
+          "feature": "body_emb_cluster_pc9",
+          "centroid_value": 0.25801273581360845,
+          "z_diff": 0.1856642056439932,
+          "abs_z": 0.1856642056439932
+        },
+        {
+          "feature": "negative_count_ratio_5d",
+          "centroid_value": 0.25499378456432803,
+          "z_diff": 0.1500201046846366,
+          "abs_z": 0.1500201046846366
+        },
+        {
+          "feature": "body_emb_cluster_pc3",
+          "centroid_value": -0.04520740242034896,
+          "z_diff": -0.12974899351171842,
+          "abs_z": 0.12974899351171842
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": 0.11222940933677406,
+          "z_diff": 0.10162455067493124,
+          "abs_z": 0.10162455067493124
+        },
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.3984665286631455,
+          "z_diff": 0.09975799614319726,
+          "abs_z": 0.09975799614319726
+        },
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.009064833851401126,
+          "z_diff": -0.0965749366739801,
+          "abs_z": 0.0965749366739801
+        },
+        {
+          "feature": "body_emb_cluster_pc2",
+          "centroid_value": -0.05131770222982647,
+          "z_diff": 0.08473885925986024,
+          "abs_z": 0.08473885925986024
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": -0.3630056404155154,
+          "z_diff": -0.07892455357807866,
+          "abs_z": 0.07892455357807866
+        }
+      ]
+    },
+    {
+      "label": "rise",
+      "count": 144,
+      "date_range": {
+        "first": "2024-06-13",
+        "last": "2026-04-02"
+      },
+      "average_predicted_return_pct": 0.41267176469167044,
+      "min_predicted_return_pct": 0.30312538146972656,
+      "max_predicted_return_pct": 0.5995392799377441,
+      "average_actual_return_pct": 0.3273166199864234,
+      "direction_accuracy": 0.5833333333333334,
+      "profile_feature_means": {
+        "ret_5": 0.003,
+        "vol_5": 0.009,
+        "vol_ratio_5": 1.4655,
+        "drawdown": -0.0273,
+        "vix_z_score_5": -0.0656,
+        "vol_shock": 0.9587,
+        "days_since_news": 1.9821,
+        "news_count_lag1": 0.592,
+        "negative_count_ratio_5d": 0.2097,
+        "title_sentiment_3d_mean": -0.0055,
+        "title_sentiment_5d_mean": -0.0152,
+        "body_sentiment_decay_5d": -0.0379,
+        "fomc_recent_5d": 0.241,
+        "fomc_sentiment_shock": -0.0004,
+        "body_emb_cluster_pc1": 0.1876,
+        "body_emb_cluster_pc2": -0.1244,
+        "body_emb_cluster_pc3": 0.1723,
+        "body_emb_cluster_pc4": 0.034,
+        "body_emb_cluster_pc5": -0.2941,
+        "body_emb_cluster_pc6": 0.2801,
+        "body_emb_cluster_pc7": -0.1153,
+        "body_emb_cluster_pc8": 0.3439,
+        "body_emb_cluster_pc9": -0.1479,
+        "body_emb_cluster_pc10": -0.143
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.699105,
+          "date": "2024-10-09",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.3269590735435486,
+          "title_sentiment_score": -0.0241492707282304,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240918.htm"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.685033,
+          "date": "2020-10-07",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.874054629355669,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20200916.htm"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.681402,
+          "date": "2023-02-22",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.2427832431456338,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20230201.htm"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.679425,
+          "date": "2017-11-22",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.5802585780620575,
+          "title_sentiment_score": -0.024149278178811,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20171101.htm"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.661189,
+          "date": "2025-02-19",
+          "category": "FOMC",
+          "doc_type": "minutes",
+          "title": "Minutes of the Federal Open Market Committee",
+          "body_sentiment_score": 0.1181504210637985,
+          "title_sentiment_score": -0.0241492632776498,
+          "link": "https://www.federalreserve.gov/monetarypolicy/fomcminutes20250129.htm"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.4654692909758333,
+          "z_diff": 0.21027773054541024,
+          "abs_z": 0.21027773054541024
+        },
+        {
+          "feature": "body_emb_cluster_pc10",
+          "centroid_value": -0.14301215742778992,
+          "z_diff": -0.17405174059659798,
+          "abs_z": 0.17405174059659798
+        },
+        {
+          "feature": "body_emb_cluster_pc9",
+          "centroid_value": -0.14788228085160487,
+          "z_diff": -0.1700935527957333,
+          "abs_z": 0.1700935527957333
+        },
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.027261409487784573,
+          "z_diff": 0.1651133831611223,
+          "abs_z": 0.1651133831611223
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": -0.11525046350559465,
+          "z_diff": 0.16307945560682782,
+          "abs_z": 0.16307945560682782
+        },
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": 0.033957783396448185,
+          "z_diff": 0.1262725513657365,
+          "abs_z": 0.1262725513657365
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": -0.06555098382549171,
+          "z_diff": -0.12358848508970369,
+          "abs_z": 0.12358848508970369
+        },
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.009024962685435662,
+          "z_diff": -0.10356493130796805,
+          "abs_z": 0.10356493130796805
+        },
+        {
+          "feature": "body_emb_cluster_pc1",
+          "centroid_value": 0.1875514059914703,
+          "z_diff": 0.10151193059845025,
+          "abs_z": 0.10151193059845025
+        },
+        {
+          "feature": "body_emb_cluster_pc3",
+          "centroid_value": 0.17228059777351823,
+          "z_diff": 0.090368978917473,
+          "abs_z": 0.090368978917473
+        }
+      ]
+    },
+    {
+      "label": "rise_strong",
+      "count": 29,
+      "date_range": {
+        "first": "2024-06-14",
+        "last": "2026-03-19"
+      },
+      "average_predicted_return_pct": 0.7514008160295143,
+      "min_predicted_return_pct": 0.6032347679138184,
+      "max_predicted_return_pct": 1.167035102844216,
+      "average_actual_return_pct": 0.5519899139916002,
+      "direction_accuracy": 0.6551724137931034,
+      "profile_feature_means": {
+        "ret_5": -0.0125,
+        "vol_5": 0.0104,
+        "vol_ratio_5": 1.2512,
+        "drawdown": -0.0448,
+        "vix_z_score_5": 0.222,
+        "vol_shock": 1.0317,
+        "days_since_news": 2.3075,
+        "news_count_lag1": 0.7672,
+        "negative_count_ratio_5d": 0.1347,
+        "title_sentiment_3d_mean": -0.0015,
+        "title_sentiment_5d_mean": -0.0083,
+        "body_sentiment_decay_5d": 0.0346,
+        "fomc_recent_5d": 0.1964,
+        "fomc_sentiment_shock": 0.0113,
+        "body_emb_cluster_pc1": 0.1139,
+        "body_emb_cluster_pc2": -0.5843,
+        "body_emb_cluster_pc3": 0.4966,
+        "body_emb_cluster_pc4": 0.0659,
+        "body_emb_cluster_pc5": -0.4127,
+        "body_emb_cluster_pc6": 0.1716,
+        "body_emb_cluster_pc7": -0.4072,
+        "body_emb_cluster_pc8": 0.5395,
+        "body_emb_cluster_pc9": 0.1021,
+        "body_emb_cluster_pc10": 0.0923
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.603282,
+          "date": "2021-12-13",
+          "category": "UCSB",
+          "doc_type": "Executive Orders",
+          "title": "Executive Order 14058—Transforming Federal Customer Experience and Service Delivery To Rebuild Trust in Government",
+          "body_sentiment_score": 0.1927369814366102,
+          "title_sentiment_score": 0.7391907284036279,
+          "link": "https://www.presidency.ucsb.edu/documents/executive-order-14058-transforming-federal-customer-experience-and-service-delivery"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.543577,
+          "date": "2021-03-25",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference",
+          "body_sentiment_score": -0.1094955125809065,
+          "title_sentiment_score": -0.0088912434875965,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-1268"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.527953,
+          "date": "2026-03-16",
+          "category": "UCSB",
+          "doc_type": "Executive Orders",
+          "title": "Executive Order 14395—Establishing the Task Force To Eliminate Fraud",
+          "body_sentiment_score": 0.0665542744100093,
+          "title_sentiment_score": 0.0703016389161348,
+          "link": "https://www.presidency.ucsb.edu/documents/executive-order-14395-establishing-the-task-force-eliminate-fraud"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.526268,
+          "date": "2022-11-30",
+          "category": "UCSB",
+          "doc_type": "Memoranda",
+          "title": "Memorandum on Uniform Standards for Tribal Consultation",
+          "body_sentiment_score": 0.063938595482365,
+          "title_sentiment_score": 0.1082578478381037,
+          "link": "https://www.presidency.ucsb.edu/documents/memorandum-uniform-standards-for-tribal-consultation"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.524889,
+          "date": "2019-06-29",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference in Osaka, Japan",
+          "body_sentiment_score": 0.0926844962976045,
+          "title_sentiment_score": -0.0264691747725009,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-osaka-japan"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "ret_5",
+          "centroid_value": -0.01245884314221551,
+          "z_diff": -0.7238946407335223,
+          "abs_z": 0.7238946407335223
+        },
+        {
+          "feature": "body_emb_cluster_pc2",
+          "centroid_value": -0.5843182668783562,
+          "z_diff": -0.492947265818058,
+          "abs_z": 0.492947265818058
+        },
+        {
+          "feature": "body_sentiment_decay_5d",
+          "centroid_value": 0.03464798995353833,
+          "z_diff": 0.4809721754775902,
+          "abs_z": 0.4809721754775902
+        },
+        {
+          "feature": "body_emb_cluster_pc3",
+          "centroid_value": 0.4966231146049547,
+          "z_diff": 0.4186336055353873,
+          "abs_z": 0.4186336055353873
+        },
+        {
+          "feature": "negative_count_ratio_5d",
+          "centroid_value": 0.1346880131017128,
+          "z_diff": -0.38405080648008955,
+          "abs_z": 0.38405080648008955
+        },
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.04476274697508151,
+          "z_diff": -0.3594728402121349,
+          "abs_z": 0.3594728402121349
+        },
+        {
+          "feature": "news_count_lag1",
+          "centroid_value": 0.7672413793103448,
+          "z_diff": 0.27674252806596106,
+          "abs_z": 0.27674252806596106
+        },
+        {
+          "feature": "vol_shock",
+          "centroid_value": 1.0317249779144977,
+          "z_diff": 0.2757164393998595,
+          "abs_z": 0.2757164393998595
+        },
+        {
+          "feature": "fomc_sentiment_shock",
+          "centroid_value": 0.011289717550123533,
+          "z_diff": 0.2729781210562855,
+          "abs_z": 0.2729781210562855
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": 0.22203978621150622,
+          "z_diff": 0.24073285105901568,
+          "abs_z": 0.24073285105901568
+        }
+      ]
+    }
+  ]
+}

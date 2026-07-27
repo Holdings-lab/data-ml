@@ -63,6 +63,7 @@ def csv_path(filename: str) -> str:
         "merged_table_sorted_encoded.csv",
         "merged_table_sorted_time_features.csv",
         "merged_finbert.csv",
+        "merged_finbert_with_embeddings.csv",
         "daily_news_features.csv",
     }
 
