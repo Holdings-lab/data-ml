@@ -15,15 +15,10 @@ if PROJECT_ROOT_STR not in sys.path:
 
 from crawler.support_legacy.data_paths import feature_csv_path, summarized_csv_path
 
-
 DEFAULT_MERGED_OUTPUT_CSV = feature_csv_path("xlf_merged_table_sorted.csv")
 DEFAULT_ENCODED_OUTPUT_CSV = feature_csv_path("xlf_merged_table_sorted_encoded.csv")
-# Note: cyclical time features removed per request
-DATE_COL = "date"
-BODY_COL = "body"
-BODY_LENGTH_COL = "body_original_length"
 
-
+# 존재하는 파일 경로만 반환
 def _existing_csv_paths(csv_paths: Iterable[str]) -> list[str]:
     return [path for path in csv_paths if Path(path).exists()]
 
@@ -57,19 +52,19 @@ def merge_csvs_to_table(
     encoding: str = "utf-8-sig",
     drop_duplicates: bool = True,
     sort_by_date: bool = True,
-    ascending: bool = True,
+    ascending: bool = False,
 ) -> pd.DataFrame:
     """
-    Read multiple CSV files and merge them into a standardized table.
+    csv_paths의 csv 파일을 읽고 하나의 테이블로 병합
+    기본 세팅은 중복 제거 및 날짜 내림차순 정렬
 
     Output columns:
-    - date: date / release_date / published_date
     - category: category
     - doc_type: doc_type
+    - release_date: release_date / published_date
+    - url: link / url
     - title: title
     - body: body
-    - body_summary: summarized body text when available
-    - link: link / url
     """
     tables: List[pd.DataFrame] = []
 
@@ -77,77 +72,65 @@ def merge_csvs_to_table(
         try:
             df = pd.read_csv(path, encoding=encoding)
         except Exception as e:
-            raise ValueError(f"Failed to read CSV {path}: {e}")
+            raise ValueError(f"[MERGED] CSV 파일 읽기 실패 {path}: {e}")
 
-        date_col = _pick_first_existing(df, ["date", "release_date", "published_date"])
-        category_col = _pick_first_existing(df, ["category"])
-        doc_type_col = _pick_first_existing(df, ["doc_type"])
-        title_col = "title" if "title" in df.columns else None
-        body_col = _pick_first_existing(df, ["body"])
-        summary_col = _pick_first_existing(df, ["body_summary", "summary"])
-        link_col = _pick_first_existing(df, ["link", "url"])
+        category = _pick_first_existing(df, ["category"])
+        doc_type = _pick_first_existing(df, ["doc_type"])
+        release_date = _pick_first_existing(df, ["release_date", "published_date"])
+        url = _pick_first_existing(df, ["link", "url"])
+        title = "title" if "title" in df.columns else None
+        body = _pick_first_existing(df, ["body"])
 
         missing = [
             name
             for name, col in [
-                ("date", date_col),
-                ("category", category_col),
-                ("doc_type", doc_type_col),
-                ("title", title_col),
-                ("body", body_col),
-                ("link", link_col),
+                ("category", category),
+                ("doc_type", doc_type),
+                ("release_date", release_date),
+                ("url", url),
+                ("title", title),
+                ("body", body),
             ]
             if col is None
         ]
+
         if missing:
             raise ValueError(
-                f"{path} is missing required columns: {missing}. "
-                f"Available columns: {list(df.columns)}"
+                f"[MERGED] {path} 존재하지 않는 컬럼 : {missing}. "
+                f"사용 가능한 컬럼: {list(df.columns)}"
             )
 
-        body_series = df[body_col].fillna("").astype(str)
-        if summary_col is not None:
-            summary_series = df[summary_col].fillna("").astype(str)
-        else:
-            summary_series = pd.Series([""] * len(df), index=df.index, dtype="object")
+        body_series = df[body].fillna("").astype(str)
+        body_length_series = body_series.str.len()
 
-        # Use existing body_original_length if available, otherwise calculate
-        if BODY_LENGTH_COL in df.columns:
-            body_length_series = pd.to_numeric(df[BODY_LENGTH_COL], errors="coerce").fillna(body_series.str.len())
-        else:
-            body_length_series = body_series.str.len()
-
-        out = pd.DataFrame(
+        output = pd.DataFrame(
             {
-                "date": _normalize_date_series(df[date_col]),
-                "category": df[category_col],
-                "doc_type": df[doc_type_col],
-                "title": df[title_col],
-                BODY_COL: body_series,
-                "body_summary": summary_series,
-                BODY_LENGTH_COL: body_length_series,
-                "link": df[link_col],
+                "category": df[category],
+                "doc_type": df[doc_type],
+                "release_date": _normalize_date_series(df[release_date]),
+                "url": df[url],
+                "body_original_length": body_length_series,
+                "title": df[title],
+                "body": body_series,
             }
         )
-        tables.append(out)
+        tables.append(output)
 
     merged = pd.concat(tables, ignore_index=True)
     if drop_duplicates:
         merged = merged.drop_duplicates()
 
-    merged = merged[["date", "category", "doc_type", "title", BODY_COL, "body_summary", BODY_LENGTH_COL, "link"]]
+    merged = merged[["category", "doc_type", "release_date", "url", "body_original_length", "title", "body"]]
 
     if sort_by_date:
-        # Convert date column to datetime for proper sorting
-        date_numeric = pd.to_datetime(merged["date"], errors="coerce")
-        merged = merged.iloc[date_numeric.values.argsort()[::-1]].reset_index(drop=True)
+        merged["release_date"] = pd.to_datetime(merged["release_date"], errors="coerce")
+        merged = merged.sort_values(by="release_date", ascending=ascending).reset_index(drop=True)
 
     return merged
 
 
 def one_hot_encode_category(
     df: pd.DataFrame,
-    keep_category: bool = True,
     prefix: str = "category",
     dtype: str = "int64",
     expected_categories: Optional[list[str]] = None,
@@ -157,8 +140,8 @@ def one_hot_encode_category(
     """
     if "category" not in df.columns:
         raise ValueError(
-            "`category` column was not found. "
-            f"Available columns: {list(df.columns)}"
+            "[ONEHOT] 'category' 칼럼을 찾을 수 없습니다. "
+            f"사용 가능한 컬럼 : {list(df.columns)}"
         )
 
     encoded = pd.get_dummies(df["category"], prefix=prefix, dtype=dtype)
@@ -173,29 +156,7 @@ def one_hot_encode_category(
         ordered_columns.extend([column for column in encoded.columns if column not in ordered_columns])
         encoded = encoded[ordered_columns]
 
-    if keep_category:
-        return pd.concat([df, encoded], axis=1)
-
-    return pd.concat([df.drop(columns=["category"]), encoded], axis=1)
-
-
-def read_csv_and_one_hot_encode_category(
-    csv_path: str,
-    encoding: str = "utf-8-sig",
-    keep_category: bool = True,
-    prefix: str = "category",
-    dtype: str = "int64",
-) -> pd.DataFrame:
-    """
-    Read a CSV file and one-hot encode the `category` column.
-    """
-    df = pd.read_csv(csv_path, encoding=encoding)
-    return one_hot_encode_category(
-        df,
-        keep_category=keep_category,
-        prefix=prefix,
-        dtype=dtype,
-    )
+    return pd.concat([df, encoded], axis=1)
 
 
 def main() -> None:
@@ -208,8 +169,8 @@ def main() -> None:
 
     if not csv_paths:
         raise FileNotFoundError(
-            "No summarized crawler outputs were found. "
-            f"Checked: {csv_candidates}"
+            "csv 파일을 찾을 수 없습니다. "
+            f"확인된 경로: {csv_candidates}"
         )
 
     merged = merge_csvs_to_table(csv_paths)
@@ -217,7 +178,7 @@ def main() -> None:
     merged.to_csv(DEFAULT_MERGED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[INFO] saved merged file: {DEFAULT_MERGED_OUTPUT_CSV}")
 
-    encoded = one_hot_encode_category(merged, keep_category=True)
+    encoded = one_hot_encode_category(merged)
     encoded.to_csv(DEFAULT_ENCODED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[INFO] saved encoded file: {DEFAULT_ENCODED_OUTPUT_CSV}")
 

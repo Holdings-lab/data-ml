@@ -9,6 +9,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+import anthropic
 from sklearn.decomposition import PCA
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,15 +25,15 @@ from crawler.postprocessing.sentence_transformer import encode_summaries
 from crawler.postprocessing.preprocessing import one_hot_encode_category
 
 # 후처리 단계 설정
+TITLE_COL = "title"
 BODY_COL = "body"
 BODY_SUMMARY_COL = "body_summary"
-TITLE_COL = "title"
-MAX_SUMMARY_CHARS = 10_000
-SLEEP_BETWEEN_SUMMARIZE_SEC = 0.5
 EMBEDDING_COL = f"{BODY_SUMMARY_COL}_embedding"
+MAX_SUMMARY_CHARS = 2000
+SLEEP_BETWEEN_SUMMARIZE_SEC = 0.5
+
 PCA_DIM = 30
 EXPECTED_CATEGORY_VALUES = ["BIS", "EIA", "FOMC", "FRASER", "UCSB", "YAHOO"]
-
 
 def _sector_pca_model_path(sector: str | None) -> str:
     """섹터별 PCA 모델 경로를 반환한다."""
@@ -71,48 +72,106 @@ def _reduce_embeddings(embeddings, pca_model):
     return pca_model.transform(embeddings).astype("float32")
 
 
-def apply_text_summarization(df: pd.DataFrame, body_col: str = BODY_COL, max_chars: int = MAX_SUMMARY_CHARS, sleep_sec: float = SLEEP_BETWEEN_SUMMARIZE_SEC) -> pd.DataFrame:
+def apply_text_summarization(df: pd.DataFrame, max_chars: int = MAX_SUMMARY_CHARS, sleep_sec: float = SLEEP_BETWEEN_SUMMARIZE_SEC) -> pd.DataFrame:
     """
     긴 본문을 요약한다.
     
     Args:
         df: 입력 데이터프레임
-        body_col: 본문 컬럼명
-        max_chars: 최대 문자 수 (이상이면 요약)
+        max_chars: 요약 결과 최대 문자 수 제한
         sleep_sec: 요약 API 호출 간 대기 시간
     
     Returns:
-        body_summary 컬럼이 추가된 데이터프레임
+        body 컬럼을 body_summary 컬럼으로 변경한 데이터프레임
     """
     df = df.copy()
-    df[body_col] = df[body_col].fillna("").astype(str)
+    df[BODY_COL] = df[BODY_COL].fillna("").astype(str)
     
-    lengths = df[body_col].str.len()
+    lengths = df[BODY_COL].str.len()
     df["body_original_length"] = lengths
-    df[BODY_SUMMARY_COL] = df[body_col]
     
-    need_summary_mask = lengths >= max_chars
-    indices = df.index[need_summary_mask].tolist()
+    indices = df.index.tolist()
+    print(f"[SUMMARIZE] 요약할 행의 총 개수 : {len(df)} (본문 길이와 상관없이 모든 행을 처리)")
     
     if indices:
-        print(f"[UNIFIED] Text Summarization: {len(indices)} rows need summarization (>= {max_chars} chars)")
-        
+        client = anthropic.Anthropic()  # 환경 변수 사용 시 api_key 생략 가능
+
         for i, idx in enumerate(indices, start=1):
-            text = df.at[idx, body_col]
-            try:
-                summary = ollama_summarize(text, limit_chars=max_chars)
-                df.at[idx, BODY_SUMMARY_COL] = summary
-            except Exception as e:
-                print(f"[UNIFIED] WARN: summarize failed row={idx}: {e} -> truncating")
-                df.at[idx, BODY_SUMMARY_COL] = text[:max_chars].rstrip()
+            text = df.at[idx, BODY_COL]
+
+            # 본문이 비어있는 경우 LLM 호출 없이 빈 문자열 처리
+            if not text.strip():
+                print(f"[SUMMARIZE] 요약 스킵 {i}/{len(indices)} row={idx} (본문 비어있음)")
+                continue
+            print(f"[SUMMARIZE] 요약 시작 {i}/{len(indices)} row={idx} body_len={len(text)}")
+
+            if df.at[idx, "category"] == "YAHOO":
+                # system prompt: 모델의 역할, 절대적 규칙, 금지 사항 명시
+                system_prompt = """
+                You are a document summarization engine.
+
+                Rules:
+
+                - Produce an abstractive summary.
+                - Rewrite everything in your own words.
+                - Never copy complete sentences from the source.
+                - Never reproduce long phrases from the source except proper nouns, dates, or exact numbers.
+                - Compress the content substantially while preserving the factual meaning.
+                - Remove redundant wording, examples, advertisements, opinions, and repetition.
+                - Preserve only factual information explicitly stated.
+                - Output only the summary text.
+                """.strip()
+
+                # user content: 동적 변수를 활용한 개별 요약 요청
+
+                user_content = f"""
+                Summarize the following document in English.
+
+                The summary MUST:
+                - Be significantly shorter than the original document.
+                - Rewrite the content using new wording.
+                - Not copy complete sentences from the source.
+                - Preserve only essential factual information.
+                - Begin immediately with the main action or decision.
+                - Stay under {max_chars} characters.
+
+                Document:
+                {text}
+                """.strip()
+
+                try:
+                    summary = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=500,
+                        temperature=0.0,
+                        system=system_prompt,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": user_content
+                            }
+                        ]
+                    )
+                    df.at[idx, BODY_COL] = summary.content[0].text
+                except Exception as e:
+                    print(f"[SUMMARIZE] 경고: 요약 실패 row={idx}: {e} -> truncating")
+                    df.at[idx, BODY_COL] = text[:max_chars].rstrip()
+            else:
+                try:
+                    summary = ollama_summarize(text, limit_chars=max_chars)
+                    df.at[idx, BODY_COL] = summary
+                except Exception as e:
+                    print(f"[SUMMARIZE] 경고: 요약 실패 row={idx}: {e} -> truncating")
+                    df.at[idx, BODY_COL] = text[:max_chars].rstrip()
             
             if i < len(indices):
                 time.sleep(sleep_sec)
         
-        print(f"[UNIFIED] Summarization complete: {len(indices)} rows summarized")
+        print(f"[SUMMARIZE] 요약 완료: {len(indices)}개 행 요약됨")
     else:
-        print(f"[UNIFIED] Text Summarization: no rows need summarization")
-    
+        print(f"[SUMMARIZE] 요약할 행이 존재하지 않음")
+
+    df.rename(columns={BODY_COL: BODY_SUMMARY_COL}, inplace=True)
     return df
 
 
@@ -124,62 +183,61 @@ def apply_one_hot_encoding(df: pd.DataFrame, category_col: str = "category") -> 
     try:
         df = one_hot_encode_category(
             df,
-            keep_category=True,
-            prefix=f"{category_col}_",
+            prefix=f"{category_col}",
             expected_categories=EXPECTED_CATEGORY_VALUES,
         )
-        print(f"[UNIFIED] One-hot Encoding: applied to {category_col}")
+        print(f"[ONEHOT] One-hot Encoding: applied to {category_col}")
     except Exception as e:
-        print(f"[UNIFIED] WARN: one-hot encoding failed: {e}")
-    
+        print(f"[ONEHOT] WARN: one-hot encoding failed: {e}")
+
     return df
 
 
-def apply_sentiment_analysis(df: pd.DataFrame, title_col: str = TITLE_COL, body_summary_col: str = BODY_SUMMARY_COL, batch_size: int = 8) -> pd.DataFrame:
+def apply_sentiment_analysis(df: pd.DataFrame, batch_size: int = 8) -> pd.DataFrame:
     """
     제목과 본문에 감성 분석을 적용한다.
     """
     df = df.copy()
     
-    if title_col not in df.columns:
-        print(f"[UNIFIED] WARN: title column '{title_col}' not found, skipping sentiment analysis")
+    if TITLE_COL not in df.columns:
+        print(f"[SENTIMENT] WARN: title column '{TITLE_COL}' not found, skipping sentiment analysis")
         return df
     
-    if body_summary_col not in df.columns:
-        print(f"[UNIFIED] WARN: body_summary column '{body_summary_col}' not found, skipping sentiment analysis")
+    if BODY_SUMMARY_COL not in df.columns:
+        print(f"[SENTIMENT] WARN: body_summary column '{BODY_SUMMARY_COL}' not found, skipping sentiment analysis")
         return df
     
-    df[title_col] = df[title_col].fillna("").astype(str)
-    df[body_summary_col] = df[body_summary_col].fillna("").astype(str)
+    df[TITLE_COL] = df[TITLE_COL].fillna("").astype(str)
+    df[BODY_SUMMARY_COL] = df[BODY_SUMMARY_COL].fillna("").astype(str)
     
-    print(f"[UNIFIED] Sentiment Analysis: analyzing {len(df)} rows...")
+    print(f"[SENTIMENT] Sentiment Analysis: analyzing {len(df)} rows...")
     
     # 제목 분석
-    title_results = analyze_titles(df[title_col].tolist(), batch_size=batch_size)
+    title_results = analyze_titles(df[TITLE_COL].tolist(), batch_size=batch_size)
     for col, values in zip(["title_positive_prob", "title_negative_prob", "title_neutral_prob", "title_sentiment_score"], zip(*[r.values() for r in title_results])):
         df[col] = list(values)
     
     # 본문 분석
-    body_results = analyze_bodies(df[body_summary_col].tolist(), max_chars=800, batch_size=batch_size)
+    body_results = analyze_bodies(df[BODY_SUMMARY_COL].tolist(), max_chars=800, batch_size=batch_size)
     for col in ["body_positive_prob", "body_negative_prob", "body_neutral_prob", "body_sentiment_score", "body_n_chunks"]:
         df[col] = [r[col] for r in body_results]
     
-    print(f"[UNIFIED] Sentiment Analysis: complete")
+    print(f"[SENTIMENT] Sentiment Analysis: complete")
     
     return df
 
 
-def apply_embeddings(df: pd.DataFrame, body_summary_col: str = BODY_SUMMARY_COL) -> pd.DataFrame:
+def apply_embeddings(df: pd.DataFrame) -> pd.DataFrame:
     """
     본문 요약에 대해 임베딩을 생성한다.
     """
     df = df.copy()
     
-    if body_summary_col not in df.columns:
-        print(f"[UNIFIED] WARN: body_summary column '{body_summary_col}' not found, skipping embeddings")
+    if BODY_SUMMARY_COL not in df.columns:
+        print(f"[EMBEDDING] WARN: body_summary column '{BODY_SUMMARY_COL}' not found, skipping embeddings")
         return df
     
-    print(f"[UNIFIED] Embeddings: encoding {len(df)} rows...")
+    print(f"[EMBEDDING] Embeddings: encoding {len(df)} rows...")
 
     if "sector" not in df.columns:
         df["sector"] = ""
@@ -191,7 +249,7 @@ def apply_embeddings(df: pd.DataFrame, body_summary_col: str = BODY_SUMMARY_COL)
         sector_label = str(sector_value or "").strip()
         pca_path = _sector_pca_model_path(sector_label)
 
-        summaries = sector_df[body_summary_col].fillna("").astype(str).tolist()
+        summaries = sector_df[BODY_SUMMARY_COL].fillna("").astype(str).tolist()
         embeddings = encode_summaries(summaries)
 
         pca_model, is_loaded = _load_or_fit_pca(embeddings, requested_components=PCA_DIM, pca_path=pca_path)
@@ -205,7 +263,7 @@ def apply_embeddings(df: pd.DataFrame, body_summary_col: str = BODY_SUMMARY_COL)
         for row_index, vector in zip(sector_df.index, reduced_vectors):
             df.at[row_index, EMBEDDING_COL] = vector
         print(
-            f"[UNIFIED] Embeddings: sector={sector_label or 'default'} "
+            f"[EMBEDDING] Embeddings: sector={sector_label or 'default'} "
             f"shape={embeddings.shape} -> PCA shape={reduced_embeddings.shape}"
         )
     
@@ -222,12 +280,11 @@ def apply_unified_pipeline(
     """데이터프레임에 통합 후처리 파이프라인을 적용합니다.
 
     인자:
-        df: 처리할 pandas DataFrame.
-        include_*: 각 처리 단계(include_summarization, include_encoding,
-                   include_sentiment, include_embeddings)를 활성화하는 플래그.
+        df: 처리할 DataFrame.
+        include_*: 각 처리 단계(include_summarization, include_encoding, include_sentiment, include_embeddings)를 활성화하는 플래그.
 
     반환:
-        처리된 pandas DataFrame. 이 함수는 파일을 저장하지 않으며,
+        처리된 DataFrame. 이 함수는 파일을 저장하지 않으며,
         결과 저장은 호출자가 담당합니다.
     """
     if df is None:

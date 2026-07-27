@@ -4,9 +4,9 @@ import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+import requests
 from bs4 import BeautifulSoup
-from pytz import timezone
+from zoneinfo import ZoneInfo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
@@ -17,170 +17,121 @@ if PROJECT_ROOT_STR not in sys.path:
 from crawler.support_legacy.data_paths import collected_csv_path
 
 # 미국 뉴욕 시간대 고정 (서머타임 자동 계산)
-NY_TZ = timezone('America/New_York')
-# 기본 타겟 데이트: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
+NY_TZ = ZoneInfo('America/New_York')
+# 기본 타겟 날짜: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
 TICKERS = ["QQQ", "XLF", "XLE"]
-
 
 def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
 
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["sector", "title", "url", "release_date", "body"])
+        writer = csv.DictWriter(f, fieldnames=["sector", "title", "release_date", "url", "body"])
         writer.writeheader()
         writer.writerows(records)
 
     return csv_path
 
-def convert_to_iso_date(date_str):
+def convert_to_et_date(utc_time_str: str) -> str:
     """
-    "Mon, June 1, 2026 at 6:18 AM GMT+9" 문자열을 
-    실제 미국 뉴욕 시간으로 시차 변환 후 "YYYY-MM-DD"로 반환합니다.
+    UTC 시간 문자열을 받아서 미국 동부 시간(ET)으로 변환 후 YYYY-MM-DD 형식으로 반환
     """
-    if not date_str:
+    if not utc_time_str:
         return "N/A"
+    
     try:
-        # 1. 'at ' 글자 제거
-        cleaned_str = re.sub(r'\s+at\s+', ' ', date_str)
+        utc_time_str = utc_time_str.replace('Z', '+00:00')
+
+        dt_utc = datetime.fromisoformat(utc_time_str)
+        dt_et = dt_utc.astimezone(ZoneInfo("America/New_York"))
         
-        # 2. 타임존 텍스트(GMT+9 등) 분리 및 획득
-        # 예: "Mon, June 1, 2026 6:18 AM GMT+9" -> "Mon, June 1, 2026 6:18 AM", "+9"
-        match = re.search(r'(GMT)([+-]\d+)$', cleaned_str)
-        
-        if match:
-            tz_offset = match.group(2) # "+9" 확보
-            # datetime 파싱을 위해 GMT+9 문구 제거
-            cleaned_str = re.sub(r'\s+GMT[+-]\d+$', '', cleaned_str)
-        else:
-            tz_offset = "+9" # 매칭 실패 시 기본 한국 시간으로 가정
-            
-        # 3. 일단 텍스트 그대로 datetime 객체 생성 (아직 타임존 정보 없음)
-        naive_dt = datetime.strptime(cleaned_str, "%a, %B %d, %Y %I:%M %p")
-        
-        # 4. 긁어온 원본 시간의 타임존(한국 표준시 KST) 강제 부여
-        # 야후 싱가포르나 캐나다 등의 변수를 고려해 offset에 맞게 세팅하는 것이 안전합니다.
-        if tz_offset == "+9":
-            origin_tz = timezone('Asia/Seoul')
-        else:
-            origin_tz = timezone('Asia/Seoul') # 예외 시 기본값
-            
-        localized_dt = origin_tz.localize(naive_dt)
-        
-        # 5. 🌟 핵심: 실제 미국 뉴욕(증시 기준시) 시간대로 시차 강제 변환
-        ny_tz = timezone('America/New_York')
-        ny_dt = localized_dt.astimezone(ny_tz)
-        
-        # 6. 미국 날짜 기준으로 ISO 문자열 출력
-        return ny_dt.strftime("%Y-%m-%d")
-        
+        return dt_et.strftime("%Y-%m-%d")
+
     except Exception as e:
         print(f"[-] 날짜 타임존 변환 실패: {e}")
         return "N/A"
 
-def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
-    print(f"[+] 동기식 Playwright 파이프라인 가동 (기준일자: {target_date})")
+def scrape_news_sync(ticker, target_date=TARGET_DATE):
+    # 1. API 엔드포인트 URL 설정
+    api_url = "https://apidojo-yahoo-finance-v1.p.rapidapi.com/news/v2/list"
+
+    # 2. 헤더 설정 (본문 추출을 위한 헤더) 
+    yahoo_headers = {
+        "x-rapidapi-key": "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5",
+        "x-rapidapi-host": "apidojo-yahoo-finance-v1.p.rapidapi.com",
+        "Content-Type": "application/json"
+    }
+
     
-    clean_dataset = []
-    
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800}
-        )
-        page = context.new_page()
+    request_headers = {
+        "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    # 2. 파라미터 및 바디 설정
+    # s: 뉴스 검색 키워드 (예: QQQ, XLF, XLE 등)
+    # snippetCount: 뉴스 개수 (최대 20)
+    querystring = {"s": ticker, "region": "US", "snippetCount": "20"}
+
+    # 3. API 요청 보내기 (빈 바디라도 post 형식이면 빈 딕셔너리를 json으로 던져주는 것이 좋습니다)
+    response = requests.post(api_url, headers=yahoo_headers, params=querystring, json={})
+
+    save_results = []
+
+    # 4. 응답 결과 정상 여부 확인 및 데이터 추출
+    if response.status_code == 200:
+        response_json = response.json()
         
-        # 상세 페이지용 공유 탭 하나만 생성
-        detail_page = context.new_page()
+        news_list = response_json.get('data', {}).get('main', {}).get('stream', [])
         
-        for ticker in tickers:
-            print(f"\n[+] [{ticker}] 섹션 뉴스 목록 로드 중...")
-            url = f"https://finance.yahoo.com/quote/{ticker}/news/"
-            page.goto(url, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000) 
+        for news in news_list:
+            content = news.get('content', {})
+            finance = content.get('finance', {})
             
-            html_content = page.content()
-            soup = BeautifulSoup(html_content, "html.parser")
-            
-            news_items = soup.select("li.stream-item")
-            print(f"[*] 포착된 {ticker} 뉴스 후보: 총 {len(news_items)}개")
-            
-            # 💡 수정 1: 조기 종료 플래그를 티커 루프 '내부'로 이동시켜 티커 간 간섭 제거
-            stop_crawl = False
-            
-            for item in news_items:
-                if stop_crawl:
+            # premium 여부 (premium 이면 본문 추출이 불가하므로 PASS)
+            premium_info = finance.get('premiumFinance', {})
+            is_premium = premium_info.get('isPremiumNews', True)
+
+            if(is_premium):
+                print(f"[!] 프리미엄 뉴스 패스: {content.get('title')[:28]}...")
+                continue
+                
+            release_date = content.get('pubDate')
+            if release_date:
+                release_date = convert_to_et_date(release_date)
+                if release_date < target_date:
+                    print(f"[!] 과거 기사 발견 ({release_date}), {ticker} 수집 조기 종료.")
                     break
 
-                a_tag = item.find("a", class_=["subtitle-link", "titles"]) or item.find("a")
-                
-                if a_tag and a_tag.get_text():
-                    title = a_tag.get_text(strip=True)
-                    link = a_tag.get("href", "")
-                    
-                    if link.startswith("/"):
-                        link = "https://finance.yahoo.com" + link
-                        
-                    if any(kw in title for kw in ["Option", "Put", "Call", "Stock Price", "History"]):
-                        continue
-                    
-                    if "finance.yahoo.com/" not in link:
-                        continue
-                        
-                    print(f"    [-> 상세 페이지 수집] {title[:28]}...")
-                    
-                    date_str = ""
-                    full_body = ""
-                    
-                    try:
-                        detail_page.goto(link, wait_until="domcontentloaded")
-                        detail_page.wait_for_timeout(1500) 
-                        
-                        soup_inner = BeautifulSoup(detail_page.content(), "html.parser")
-                        
-                        # 상세 날짜 파싱 및 변환
-                        time_tag = soup_inner.find("time", class_="byline-attr-meta-time") or soup_inner.find("time")
-                        if time_tag:
-                            raw_date = time_tag.get_text(strip=True)
-                            date_str = convert_to_iso_date(raw_date)
-
-                        # 🛡️ 날짜 조건 체크 및 조기 종료 선언
-                        if date_str != "N/A" and date_str < target_date:
-                            print(f"    [!] 과거 기사 발견 ({date_str}), {ticker} 수집 조기 종료.")
-                            stop_crawl = True
-                            break
-
-                        # 상세 본문 파싱
-                        body_tag = soup_inner.find("div", class_="bodyItems-wrapper") or soup_inner.find(class_="caas-body")
-                        if body_tag:
-                            paragraphs = [p.get_text(strip=True) for p in body_tag.find_all("p")]
-                            full_body = " ".join(paragraphs)
-                        else:
-                            time.sleep(1)
-                            continue
-
-                    except Exception as detail_err:
-                        print(f"    [-] 파싱 에러 패스: {detail_err}")
-                        continue 
-
-                    clean_dataset.append({
-                        "sector": ticker,
-                        "title": title,
-                        "url": link,
-                        "release_date": date_str if date_str else "N/A",
-                        "body": full_body
-                    })
-                    
-                    time.sleep(1)
-        
-        browser.close()
-
-    return clean_dataset
-
+            body_url = content.get('clickThroughUrl', {}).get('url') if content.get('clickThroughUrl') else None
+            response = requests.get(body_url, headers=request_headers, timeout=20)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            body_tag = soup.find("div", class_="bodyItems-wrapper")
+            body_text = body_tag.get_text(" ", strip=True) if body_tag else ""                
+            
+            # 행(Row) 데이터 생성
+            row = {
+                "sector": ticker,
+                "title": content.get('title'),
+                "release_date": release_date,
+                "url": body_url,
+                "body": body_text
+            }
+            save_results.append(row)
+        return save_results
+    else:
+        print(f"API 요청 실패 (Error Code: {response.status_code})")
+        print(response.text)
 
 def main():
-    news_results = scrape_news_sync()
+    news_results = scrape_news_sync(ticker="QQQ")
 
     if news_results:
         target_date = news_results[0]["release_date"] if news_results[0].get("release_date") else TARGET_DATE

@@ -9,6 +9,10 @@ import pandas as pd
 CATEGORY_TO_PREFIX = {
     "FOMC": "fomc",
     "BIS": "bis",
+    "EIA": "eia",
+    "FRASER": "fraser",
+    "UCSB": "ucsb",
+    "YAHOO": "yahoo",
     "White House": "white_house",
 }
 
@@ -105,7 +109,15 @@ def load_news_source_table(input_path) -> pd.DataFrame:
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     prepared = prepared.dropna(subset=["date"]).copy()
 
-    prepared["category"] = prepared["category"].fillna("Unknown").astype(str)
+    def _normalize_category_value(value: object) -> str:
+        text = str(value).strip()
+        if text == "UCSB Presidency Project":
+            return "UCSB"
+        if text.islower():
+            return text.upper()
+        return text
+
+    prepared["category"] = prepared["category"].fillna("Unknown").map(_normalize_category_value)
     prepared["doc_type"] = prepared["doc_type"].fillna("unknown").astype(str)
     prepared["title"] = prepared["title"].fillna("").astype(str)
     prepared["body"] = prepared["body"].fillna("").astype(str)
@@ -150,12 +162,18 @@ def build_daily_news_feature_table(news_df: pd.DataFrame) -> pd.DataFrame:
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce").dt.tz_localize(None)
     prepared = prepared.dropna(subset=["date"]).copy()
 
-    if "category_BIS" not in prepared.columns:
-        prepared["category_BIS"] = prepared["category"].eq("BIS").astype(int)
-    if "category_FOMC" not in prepared.columns:
-        prepared["category_FOMC"] = prepared["category"].eq("FOMC").astype(int)
-    if "category_White House" not in prepared.columns:
-        prepared["category_White House"] = prepared["category"].eq("White House").astype(int)
+    expected_category_columns = {
+        "category_BIS": "BIS",
+        "category_FOMC": "FOMC",
+        "category_EIA": "EIA",
+        "category_FRASER": "FRASER",
+        "category_UCSB": "UCSB",
+        "category_YAHOO": "YAHOO",
+        "category_White House": "White House",
+    }
+    for column_name, category_value in expected_category_columns.items():
+        if column_name not in prepared.columns:
+            prepared[column_name] = prepared["category"].eq(category_value).astype(int)
 
     probability_defaults = {
         "title_positive_prob": 0.0,
