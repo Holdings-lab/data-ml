@@ -32,7 +32,7 @@ from crawler.collectors.ucsb import (
     parse_article,
 )
 from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
-from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
+from crawler.support_legacy.data_paths import feature_csv_path
 
 BASE_URL = "https://www.federalreserve.gov"
 FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
