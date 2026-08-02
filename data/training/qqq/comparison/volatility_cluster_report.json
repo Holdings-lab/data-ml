@@ -1,0 +1,855 @@
+{
+  "model_kind": "predicted_forward_return_profile_clusters",
+  "target": "market_news_model_predicted_forward_return",
+  "prediction_summary_scope": "market_news_test_predictions",
+  "horizon": 5,
+  "window_days": 5,
+  "labels": [
+    "fall_strong",
+    "fall",
+    "neutral",
+    "rise",
+    "rise_strong"
+  ],
+  "fixed_thresholds": [
+    -0.003,
+    0.0,
+    0.003,
+    0.006
+  ],
+  "feature_columns": [
+    "ret_5",
+    "vol_5",
+    "vol_ratio_5",
+    "drawdown",
+    "vix_z_score_5",
+    "vol_shock",
+    "days_since_news",
+    "news_count_lag1",
+    "negative_count_ratio_5d",
+    "title_sentiment_3d_mean",
+    "title_sentiment_5d_mean",
+    "body_sentiment_decay_5d",
+    "fomc_recent_5d",
+    "fomc_sentiment_shock",
+    "body_emb_cluster_pc1",
+    "body_emb_cluster_pc2",
+    "body_emb_cluster_pc3",
+    "body_emb_cluster_pc4",
+    "body_emb_cluster_pc5",
+    "body_emb_cluster_pc6",
+    "body_emb_cluster_pc7",
+    "body_emb_cluster_pc8",
+    "body_emb_cluster_pc9",
+    "body_emb_cluster_pc10"
+  ],
+  "source_model_metrics": {
+    "mae": 11.136300542087135,
+    "rmse": 14.470065566962198,
+    "r2_score": 0.9421413694742392,
+    "direction_accuracy": 0.5802997858672377,
+    "mape": 2.1192744202286566,
+    "baseline_mae": 11.439499326130052,
+    "baseline_rmse": 14.596430932735238,
+    "baseline_mape": 2.169073678140874,
+    "high_conf_threshold": 0.4754478931427002,
+    "high_conf_long_accuracy": 0.6422764227642277,
+    "high_conf_long_count": 123,
+    "high_conf_short_accuracy": 0.5294117647058824,
+    "high_conf_short_count": 17
+  },
+  "representative_news_method": "Label centroid body_emb_cluster_pc* values are inverse-transformed to the original body_emb_* space, then matched to source news by cosine similarity.",
+  "profile_feature_ranking_method": "For each label centroid, original-scale feature values are compared against the global profile mean and sorted by absolute z-difference.",
+  "predicted_groups": [
+    {
+      "label": "fall_strong",
+      "count": 27,
+      "date_range": {
+        "first": "2024-10-07",
+        "last": "2025-05-28"
+      },
+      "average_predicted_return_pct": -0.5647994853832103,
+      "min_predicted_return_pct": -0.9610354900360107,
+      "max_predicted_return_pct": -0.31580328941345215,
+      "average_actual_return_pct": 0.3812936631140721,
+      "direction_accuracy": 0.5185185185185185,
+      "profile_feature_means": {
+        "ret_5": -0.0077,
+        "vol_5": 0.0186,
+        "vol_ratio_5": 1.3536,
+        "drawdown": -0.0661,
+        "vix_z_score_5": 0.1889,
+        "vol_shock": 1.0386,
+        "days_since_news": 1.5864,
+        "news_count_lag1": 0.9907,
+        "negative_count_ratio_5d": 0.2238,
+        "title_sentiment_3d_mean": 0.0217,
+        "title_sentiment_5d_mean": 0.0114,
+        "body_sentiment_decay_5d": 0.0447,
+        "fomc_recent_5d": 0.1012,
+        "fomc_sentiment_shock": -0.0001,
+        "body_emb_cluster_pc1": 0.0836,
+        "body_emb_cluster_pc2": 0.3589,
+        "body_emb_cluster_pc3": -0.1416,
+        "body_emb_cluster_pc4": -0.0042,
+        "body_emb_cluster_pc5": -0.0137,
+        "body_emb_cluster_pc6": 0.087,
+        "body_emb_cluster_pc7": 0.563,
+        "body_emb_cluster_pc8": -0.6341,
+        "body_emb_cluster_pc9": 0.0361,
+        "body_emb_cluster_pc10": -0.0226
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.610142,
+          "date": "2018-04-03",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With President Kersti Kaljulaid of Estonia, President Raimonds Vejonis of Latvia, and President Dalia Grybauskaite of Lithuania",
+          "body_sentiment_score": 0.889109319075942,
+          "title_sentiment_score": 0.0120311938226223,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-president-kersti-kaljulaid-estonia-president-raimonds"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.564103,
+          "date": "2018-07-13",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Prime Minister Theresa May of the United Kingdom in Buckinghamshire, United Kingdom",
+          "body_sentiment_score": 0.8576917732134461,
+          "title_sentiment_score": -0.0026253648102283,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-prime-minister-theresa-may-the-united-kingdom-0"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.559922,
+          "date": "2019-06-12",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With President Andrzej Duda of Poland",
+          "body_sentiment_score": 0.8894347725436091,
+          "title_sentiment_score": 0.0076444633305072,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-president-andrzej-duda-poland-0"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.534192,
+          "date": "2018-01-10",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Prime Minister Erna Solberg of Norway",
+          "body_sentiment_score": 0.824013558216393,
+          "title_sentiment_score": 0.0171574279665946,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-prime-minister-erna-solberg-norway"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.531893,
+          "date": "2017-02-13",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Prime Minister Justin P.J. Trudeau of Canada",
+          "body_sentiment_score": 0.7549940375611186,
+          "title_sentiment_score": 0.0011787824332714,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-prime-minister-justin-pj-trudeau-canada"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.018557481167696652,
+          "z_diff": 0.9958228059603924,
+          "abs_z": 0.9958228059603924
+        },
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.06614561099941575,
+          "z_diff": -0.6756096140360046,
+          "abs_z": 0.6756096140360046
+        },
+        {
+          "feature": "body_emb_cluster_pc8",
+          "centroid_value": -0.6340816872891446,
+          "z_diff": -0.5067697349636943,
+          "abs_z": 0.5067697349636943
+        },
+        {
+          "feature": "fomc_recent_5d",
+          "centroid_value": 0.10123456790123458,
+          "z_diff": -0.4597923168891019,
+          "abs_z": 0.4597923168891019
+        },
+        {
+          "feature": "ret_5",
+          "centroid_value": -0.007663676838628877,
+          "z_diff": -0.4562077652918856,
+          "abs_z": 0.4562077652918856
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": 0.5629694244735934,
+          "z_diff": 0.4268897722922485,
+          "abs_z": 0.4268897722922485
+        },
+        {
+          "feature": "body_emb_cluster_pc2",
+          "centroid_value": 0.3588730125534902,
+          "z_diff": 0.3464003683812242,
+          "abs_z": 0.3464003683812242
+        },
+        {
+          "feature": "vol_shock",
+          "centroid_value": 1.0386146124555564,
+          "z_diff": 0.2832583205909592,
+          "abs_z": 0.2832583205909592
+        },
+        {
+          "feature": "news_count_lag1",
+          "centroid_value": 0.9907407407407407,
+          "z_diff": 0.24349873343424513,
+          "abs_z": 0.24349873343424513
+        },
+        {
+          "feature": "title_sentiment_5d_mean",
+          "centroid_value": 0.01137476880088015,
+          "z_diff": -0.2314519780245368,
+          "abs_z": 0.2314519780245368
+        }
+      ]
+    },
+    {
+      "label": "fall",
+      "count": 11,
+      "date_range": {
+        "first": "2024-10-10",
+        "last": "2026-03-27"
+      },
+      "average_predicted_return_pct": -0.18477819182656027,
+      "min_predicted_return_pct": -0.29041171073913574,
+      "max_predicted_return_pct": -0.11160969734191895,
+      "average_actual_return_pct": 0.611421674340227,
+      "direction_accuracy": 0.36363636363636365,
+      "profile_feature_means": {
+        "ret_5": 0.0008,
+        "vol_5": 0.0093,
+        "vol_ratio_5": 1.2847,
+        "drawdown": -0.0315,
+        "vix_z_score_5": -0.1154,
+        "vol_shock": 0.9561,
+        "days_since_news": 2.8485,
+        "news_count_lag1": 0.4394,
+        "negative_count_ratio_5d": 0.0753,
+        "title_sentiment_3d_mean": 0.0207,
+        "title_sentiment_5d_mean": 0.0131,
+        "body_sentiment_decay_5d": 0.1574,
+        "fomc_recent_5d": 0.197,
+        "fomc_sentiment_shock": 0.0033,
+        "body_emb_cluster_pc1": 0.5015,
+        "body_emb_cluster_pc2": 0.1479,
+        "body_emb_cluster_pc3": 0.2596,
+        "body_emb_cluster_pc4": 0.4563,
+        "body_emb_cluster_pc5": -0.7254,
+        "body_emb_cluster_pc6": -0.0061,
+        "body_emb_cluster_pc7": 0.5676,
+        "body_emb_cluster_pc8": -0.3146,
+        "body_emb_cluster_pc9": 0.2632,
+        "body_emb_cluster_pc10": -0.1867
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.61679,
+          "date": "2022-02-24",
+          "category": "BIS",
+          "doc_type": "press_release",
+          "title": "COMMERCE IMPLEMENTS SWEEPING RESTRICTIONS ON EXPORTS TO RUSSIA IN RESPONSE TO FURTHER INVASION OF UKRAINE",
+          "body_sentiment_score": -0.1316652785941386,
+          "title_sentiment_score": -0.3378524594008922,
+          "link": "https://www.bis.gov/press-release/commerce-implements-sweeping-restrictions-exports-russia-response-further-invasion-ukraine"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.606685,
+          "date": "2019-11-25",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement by President Trump and Prime Minister Boyko Borisov of Bulgaria",
+          "body_sentiment_score": 0.7575494467265197,
+          "title_sentiment_score": 0.1428673500195145,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-president-trump-and-prime-minister-boyko-borisov-bulgaria"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.563126,
+          "date": "2019-03-07",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement by President Trump and Prime Minister Andrej Babis of the Czech Republic",
+          "body_sentiment_score": 0.6128318579642639,
+          "title_sentiment_score": 0.2654097136110067,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-president-trump-and-prime-minister-andrej-babis-the-czech-republic"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.556038,
+          "date": "2024-09-22",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement on Efforts To Counter the Proliferation and Misuse of Commercial Spyware",
+          "body_sentiment_score": 0.0706395401625278,
+          "title_sentiment_score": 0.1819232366979122,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-efforts-counter-the-proliferation-and-misuse-commercial-spyware-1"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.535001,
+          "date": "2023-03-02",
+          "category": "BIS",
+          "doc_type": "press_release",
+          "title": "Remarks by Assistant Secretary Thea D. Rozman Kendler to the Association of Women in International Trade (WIIT)",
+          "body_sentiment_score": 0.1724117649369732,
+          "title_sentiment_score": 0.0221806801855564,
+          "link": "https://www.bis.gov/press-release/remarks-assistant-secretary-thea-d.-rozman-kendler-association-women-international-trade-wiit"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "body_emb_cluster_pc5",
+          "centroid_value": -0.7254016416703184,
+          "z_diff": -0.774181526457811,
+          "abs_z": 0.774181526457811
+        },
+        {
+          "feature": "body_sentiment_decay_5d",
+          "centroid_value": 0.15738265548390792,
+          "z_diff": 0.7015696535038708,
+          "abs_z": 0.7015696535038708
+        },
+        {
+          "feature": "negative_count_ratio_5d",
+          "centroid_value": 0.07525252519370368,
+          "z_diff": -0.650079359662719,
+          "abs_z": 0.650079359662719
+        },
+        {
+          "feature": "news_count_lag1",
+          "centroid_value": 0.4393939393939394,
+          "z_diff": -0.5795408156837826,
+          "abs_z": 0.5795408156837826
+        },
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": 0.45633452965589644,
+          "z_diff": 0.5147313806720814,
+          "abs_z": 0.5147313806720814
+        },
+        {
+          "feature": "body_emb_cluster_pc1",
+          "centroid_value": 0.5014867555789883,
+          "z_diff": 0.47028661775403413,
+          "abs_z": 0.47028661775403413
+        },
+        {
+          "feature": "days_since_news",
+          "centroid_value": 2.8484848484848486,
+          "z_diff": 0.4652114955909438,
+          "abs_z": 0.4652114955909438
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": 0.567597406191988,
+          "z_diff": 0.4321774130001766,
+          "abs_z": 0.4321774130001766
+        },
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.2846508451942436,
+          "z_diff": -0.4097744052594992,
+          "abs_z": 0.4097744052594992
+        },
+        {
+          "feature": "body_emb_cluster_pc10",
+          "centroid_value": -0.1866897855526314,
+          "z_diff": -0.3966388409206779,
+          "abs_z": 0.3966388409206779
+        }
+      ]
+    },
+    {
+      "label": "neutral",
+      "count": 42,
+      "date_range": {
+        "first": "2024-07-24",
+        "last": "2026-04-17"
+      },
+      "average_predicted_return_pct": 0.22096917742774388,
+      "min_predicted_return_pct": 0.06345510482788086,
+      "max_predicted_return_pct": 0.29996633529663086,
+      "average_actual_return_pct": 0.2831193109674433,
+      "direction_accuracy": 0.5238095238095238,
+      "profile_feature_means": {
+        "ret_5": 0.0098,
+        "vol_5": 0.0118,
+        "vol_ratio_5": 1.361,
+        "drawdown": -0.0397,
+        "vix_z_score_5": -0.0174,
+        "vol_shock": 0.9736,
+        "days_since_news": 2.2857,
+        "news_count_lag1": 0.9167,
+        "negative_count_ratio_5d": 0.1923,
+        "title_sentiment_3d_mean": 0.056,
+        "title_sentiment_5d_mean": 0.053,
+        "body_sentiment_decay_5d": 0.0086,
+        "fomc_recent_5d": 0.4203,
+        "fomc_sentiment_shock": 0.0043,
+        "body_emb_cluster_pc1": 0.0419,
+        "body_emb_cluster_pc2": 0.0657,
+        "body_emb_cluster_pc3": 0.0452,
+        "body_emb_cluster_pc4": 0.1356,
+        "body_emb_cluster_pc5": -0.1187,
+        "body_emb_cluster_pc6": -0.1752,
+        "body_emb_cluster_pc7": 0.2823,
+        "body_emb_cluster_pc8": -0.1285,
+        "body_emb_cluster_pc9": -0.1784,
+        "body_emb_cluster_pc10": 0.1244
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.548131,
+          "date": "2021-07-15",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement by President Biden and Chancellor Angela Merkel of Germany—Washington Declaration",
+          "body_sentiment_score": 0.3783809374932921,
+          "title_sentiment_score": 0.0887309024110436,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-president-biden-and-chancellor-angela-merkel-germany-washington"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.495815,
+          "date": "2019-11-25",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement by President Trump and Prime Minister Boyko Borisov of Bulgaria",
+          "body_sentiment_score": 0.7575494467265197,
+          "title_sentiment_score": 0.1428673500195145,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-president-trump-and-prime-minister-boyko-borisov-bulgaria"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.483913,
+          "date": "2025-04-18",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Joint Statement by President Trump and Prime Minister Giorgia Meloni of Italy",
+          "body_sentiment_score": 0.7852439513195175,
+          "title_sentiment_score": 0.229970077984035,
+          "link": "https://www.presidency.ucsb.edu/documents/joint-statement-president-trump-and-prime-minister-giorgia-meloni-italy"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.47839,
+          "date": "2024-04-23",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Statement on Senate Passage of National Security Supplemental Appropriations Legislation",
+          "body_sentiment_score": 0.3361615362615945,
+          "title_sentiment_score": 0.0746098477393388,
+          "link": "https://www.presidency.ucsb.edu/documents/statement-senate-passage-national-security-supplemental-appropriations-legislation"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.470424,
+          "date": "2022-02-24",
+          "category": "BIS",
+          "doc_type": "press_release",
+          "title": "COMMERCE IMPLEMENTS SWEEPING RESTRICTIONS ON EXPORTS TO RUSSIA IN RESPONSE TO FURTHER INVASION OF UKRAINE",
+          "body_sentiment_score": -0.1316652785941386,
+          "title_sentiment_score": -0.3378524594008922,
+          "link": "https://www.bis.gov/press-release/commerce-implements-sweeping-restrictions-exports-russia-response-further-invasion-ukraine"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "fomc_recent_5d",
+          "centroid_value": 0.4203042328042328,
+          "z_diff": 0.4306290005090746,
+          "abs_z": 0.4306290005090746
+        },
+        {
+          "feature": "ret_5",
+          "centroid_value": 0.00983970636286891,
+          "z_diff": 0.22258929636979746,
+          "abs_z": 0.22258929636979746
+        },
+        {
+          "feature": "title_sentiment_3d_mean",
+          "centroid_value": 0.05604102694380882,
+          "z_diff": 0.2205892274886009,
+          "abs_z": 0.2205892274886009
+        },
+        {
+          "feature": "title_sentiment_5d_mean",
+          "centroid_value": 0.05296738219085251,
+          "z_diff": 0.2193584563606064,
+          "abs_z": 0.2193584563606064
+        },
+        {
+          "feature": "days_since_news",
+          "centroid_value": 2.2857142857142856,
+          "z_diff": 0.19693709534657547,
+          "abs_z": 0.19693709534657547
+        },
+        {
+          "feature": "body_emb_cluster_pc4",
+          "centroid_value": 0.13558992398116101,
+          "z_diff": 0.18348488451809808,
+          "abs_z": 0.18348488451809808
+        },
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.3610189575397422,
+          "z_diff": -0.1650442862999912,
+          "abs_z": 0.1650442862999912
+        },
+        {
+          "feature": "news_count_lag1",
+          "centroid_value": 0.9166666666666666,
+          "z_diff": 0.13292242759854064,
+          "abs_z": 0.13292242759854064
+        },
+        {
+          "feature": "body_emb_cluster_pc6",
+          "centroid_value": -0.17516812826803646,
+          "z_diff": -0.12704019940324424,
+          "abs_z": 0.12704019940324424
+        },
+        {
+          "feature": "body_emb_cluster_pc3",
+          "centroid_value": 0.04519852504664175,
+          "z_diff": 0.11222812431857011,
+          "abs_z": 0.11222812431857011
+        }
+      ]
+    },
+    {
+      "label": "rise",
+      "count": 328,
+      "date_range": {
+        "first": "2024-06-13",
+        "last": "2026-04-24"
+      },
+      "average_predicted_return_pct": 0.4208303442815446,
+      "min_predicted_return_pct": 0.30382871627807617,
+      "max_predicted_return_pct": 0.5985140800476074,
+      "average_actual_return_pct": 0.2888785996446329,
+      "direction_accuracy": 0.5884146341463414,
+      "profile_feature_means": {
+        "ret_5": 0.0081,
+        "vol_5": 0.0099,
+        "vol_ratio_5": 1.4331,
+        "drawdown": -0.0295,
+        "vix_z_score_5": -0.0309,
+        "vol_shock": 0.9065,
+        "days_since_news": 1.8003,
+        "news_count_lag1": 0.795,
+        "negative_count_ratio_5d": 0.2264,
+        "title_sentiment_3d_mean": 0.031,
+        "title_sentiment_5d_mean": 0.0338,
+        "body_sentiment_decay_5d": 0.0086,
+        "fomc_recent_5d": 0.2762,
+        "fomc_sentiment_shock": 0.0016,
+        "body_emb_cluster_pc1": 0.1086,
+        "body_emb_cluster_pc2": -0.0729,
+        "body_emb_cluster_pc3": -0.0701,
+        "body_emb_cluster_pc4": -0.0831,
+        "body_emb_cluster_pc5": -0.0032,
+        "body_emb_cluster_pc6": -0.0424,
+        "body_emb_cluster_pc7": 0.0903,
+        "body_emb_cluster_pc8": -0.1062,
+        "body_emb_cluster_pc9": -0.0824,
+        "body_emb_cluster_pc10": 0.1775
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.561375,
+          "date": "2023-11-21",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Statement on the Release of Hostages Held by Hamas in Gaza, Palestinian Territories",
+          "body_sentiment_score": 0.4727169765827533,
+          "title_sentiment_score": -0.0686657652258873,
+          "link": "https://www.presidency.ucsb.edu/documents/statement-the-release-hostages-held-hamas-gaza-palestinian-territories"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.503661,
+          "date": "2025-02-04",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Prime Minister Benjamin Netanyahu of Israel",
+          "body_sentiment_score": 0.3413196820765733,
+          "title_sentiment_score": 0.0563145354390144,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-prime-minister-benjamin-netanyahu-israel-0"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.496668,
+          "date": "2021-11-07",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Statement on the Terrorist Attack in Baghdad, Iraq",
+          "body_sentiment_score": 0.0731979254082652,
+          "title_sentiment_score": -0.0664967391639947,
+          "link": "https://www.presidency.ucsb.edu/documents/statement-the-terrorist-attack-baghdad-iraq"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.495861,
+          "date": "2021-02-04",
+          "category": "UCSB",
+          "doc_type": "Executive Orders",
+          "title": "Executive Order 14013—Rebuilding and Enhancing Programs To Resettle Refugees and Planning for the Impact of Climate Change on Migration",
+          "body_sentiment_score": 0.3010595823003418,
+          "title_sentiment_score": 0.5329092126339674,
+          "link": "https://www.presidency.ucsb.edu/documents/executive-order-14013-rebuilding-and-enhancing-programs-resettle-refugees-and-planning-for"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.487583,
+          "date": "2025-03-18",
+          "category": "UCSB",
+          "doc_type": "Statements",
+          "title": "Statement on the President's Meeting With National Security Adviser Tahnoon bin Zayed Al Nahyan of the United Arab Emirates",
+          "body_sentiment_score": 0.7988798646256328,
+          "title_sentiment_score": 0.057671308517456,
+          "link": "https://www.presidency.ucsb.edu/documents/statement-the-presidents-meeting-with-national-security-adviser-tahnoon-bin-zayed-al"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.029453446627762742,
+          "z_diff": 0.22518311632298266,
+          "abs_z": 0.22518311632298266
+        },
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.009893870779262386,
+          "z_diff": -0.20347722274586805,
+          "abs_z": 0.20347722274586805
+        },
+        {
+          "feature": "ret_5",
+          "centroid_value": 0.008145116300966261,
+          "z_diff": 0.1568715581760649,
+          "abs_z": 0.1568715581760649
+        },
+        {
+          "feature": "vol_shock",
+          "centroid_value": 0.9064950645680523,
+          "z_diff": -0.11448906112782452,
+          "abs_z": 0.11448906112782452
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": 0.09033950053381133,
+          "z_diff": -0.11310743981340185,
+          "abs_z": 0.11310743981340185
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": -0.030857507912714015,
+          "z_diff": -0.07963862710726381,
+          "abs_z": 0.07963862710726381
+        },
+        {
+          "feature": "vol_ratio_5",
+          "centroid_value": 1.4331001704897641,
+          "z_diff": 0.0659479862364434,
+          "abs_z": 0.0659479862364434
+        },
+        {
+          "feature": "body_sentiment_decay_5d",
+          "centroid_value": 0.008597341552295136,
+          "z_diff": -0.06591805050488626,
+          "abs_z": 0.06591805050488626
+        },
+        {
+          "feature": "body_emb_cluster_pc2",
+          "centroid_value": -0.07288591441000138,
+          "z_diff": -0.06583799748991885,
+          "abs_z": 0.06583799748991885
+        },
+        {
+          "feature": "negative_count_ratio_5d",
+          "centroid_value": 0.22639624158233168,
+          "z_diff": 0.05575652734415585,
+          "abs_z": 0.05575652734415585
+        }
+      ]
+    },
+    {
+      "label": "rise_strong",
+      "count": 59,
+      "date_range": {
+        "first": "2024-07-11",
+        "last": "2026-03-30"
+      },
+      "average_predicted_return_pct": 0.8348780163263859,
+      "min_predicted_return_pct": 0.6067276000976562,
+      "max_predicted_return_pct": 1.3138890266418457,
+      "average_actual_return_pct": 1.0538225890378699,
+      "direction_accuracy": 0.6440677966101694,
+      "profile_feature_means": {
+        "ret_5": -0.0165,
+        "vol_5": 0.0163,
+        "vol_ratio_5": 1.3856,
+        "drawdown": -0.0776,
+        "vix_z_score_5": 0.3724,
+        "vol_shock": 1.09,
+        "days_since_news": 1.9294,
+        "news_count_lag1": 0.9435,
+        "negative_count_ratio_5d": 0.1855,
+        "title_sentiment_3d_mean": 0.0269,
+        "title_sentiment_5d_mean": 0.0258,
+        "body_sentiment_decay_5d": 0.0655,
+        "fomc_recent_5d": 0.1877,
+        "fomc_sentiment_shock": -0.0059,
+        "body_emb_cluster_pc1": -0.1169,
+        "body_emb_cluster_pc2": 0.1355,
+        "body_emb_cluster_pc3": -0.0247,
+        "body_emb_cluster_pc4": -0.0507,
+        "body_emb_cluster_pc5": 0.084,
+        "body_emb_cluster_pc6": -0.189,
+        "body_emb_cluster_pc7": 0.432,
+        "body_emb_cluster_pc8": -0.196,
+        "body_emb_cluster_pc9": -0.2993,
+        "body_emb_cluster_pc10": 0.3509
+      },
+      "representative_embedding_news": [
+        {
+          "rank": 1,
+          "similarity": 0.671288,
+          "date": "2018-11-07",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference in Washington, D.C.",
+          "body_sentiment_score": 0.8204918261617422,
+          "title_sentiment_score": -0.0107289794832468,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-washington-dc"
+        },
+        {
+          "rank": 2,
+          "similarity": 0.639953,
+          "date": "2017-03-17",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Chancellor Angela Merkel of Germany",
+          "body_sentiment_score": 0.6104639917612076,
+          "title_sentiment_score": 0.0181537866592407,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-chancellor-angela-merkel-germany-5"
+        },
+        {
+          "rank": 3,
+          "similarity": 0.639784,
+          "date": "2017-10-16",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference With Senate Majority Leader A. Mitchell McConnell",
+          "body_sentiment_score": 0.4296058062463999,
+          "title_sentiment_score": 0.0019396301358938,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-with-senate-majority-leader-mitchell-mcconnell"
+        },
+        {
+          "rank": 4,
+          "similarity": 0.63427,
+          "date": "2022-01-19",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference",
+          "body_sentiment_score": 0.4310243112743515,
+          "title_sentiment_score": -0.0088912360370159,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-1269"
+        },
+        {
+          "rank": 5,
+          "similarity": 0.614048,
+          "date": "2017-02-16",
+          "category": "UCSB",
+          "doc_type": "News Conferences",
+          "title": "The President's News Conference",
+          "body_sentiment_score": -0.0892316236107979,
+          "title_sentiment_score": -0.0088912360370159,
+          "link": "https://www.presidency.ucsb.edu/documents/the-presidents-news-conference-1138"
+        }
+      ],
+      "profile_feature_ranking": [
+        {
+          "feature": "drawdown",
+          "centroid_value": -0.07761813891699405,
+          "z_diff": -0.9572602041270871,
+          "abs_z": 0.9572602041270871
+        },
+        {
+          "feature": "ret_5",
+          "centroid_value": -0.01648055873797501,
+          "z_diff": -0.79813443497607,
+          "abs_z": 0.79813443497607
+        },
+        {
+          "feature": "vol_5",
+          "centroid_value": 0.0163024902782529,
+          "z_diff": 0.6836653430564074,
+          "abs_z": 0.6836653430564074
+        },
+        {
+          "feature": "vol_shock",
+          "centroid_value": 1.090042662667905,
+          "z_diff": 0.4380830429422717,
+          "abs_z": 0.4380830429422717
+        },
+        {
+          "feature": "vix_z_score_5",
+          "centroid_value": 0.3723806115544531,
+          "z_diff": 0.43118531363143175,
+          "abs_z": 0.43118531363143175
+        },
+        {
+          "feature": "body_emb_cluster_pc7",
+          "centroid_value": 0.43202830843480877,
+          "z_diff": 0.2772846922297447,
+          "abs_z": 0.2772846922297447
+        },
+        {
+          "feature": "body_sentiment_decay_5d",
+          "centroid_value": 0.0654631020696274,
+          "z_diff": 0.22741581977359737,
+          "abs_z": 0.22741581977359737
+        },
+        {
+          "feature": "body_emb_cluster_pc1",
+          "centroid_value": -0.11692430170445439,
+          "z_diff": -0.22285243187880208,
+          "abs_z": 0.22285243187880208
+        },
+        {
+          "feature": "fomc_recent_5d",
+          "centroid_value": 0.18766478342749526,
+          "z_diff": -0.21859324710195022,
+          "abs_z": 0.21859324710195022
+        },
+        {
+          "feature": "body_emb_cluster_pc10",
+          "centroid_value": 0.3508772166430512,
+          "z_diff": 0.19368761816336455,
+          "abs_z": 0.19368761816336455
+        }
+      ]
+    }
+  ]
+}

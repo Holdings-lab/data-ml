@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(not exist *)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\admin\\\\data-ml\\\\docs\" -Force)"
+    ]
+  }
+}

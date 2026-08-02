@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from shared.config.schema import MarketNewsTrainingConfig
+from shared.config.ticker_presets import (
+    DEFAULT_SUPPLEMENTARY_TICKER_FEATURE_SUFFIXES,
+    FIXED_MACRO_TICKERS,
+    ticker_slug,
+)
 
 
 FeatureBuilder = Callable[[pd.DataFrame], list[str]]
@@ -24,16 +29,51 @@ def _get_series(data: pd.DataFrame, field: str, ticker: str) -> pd.Series:
     return series
 
 
+_FIXED_MACRO_TICKER_KEYS = {ticker.upper() for ticker in FIXED_MACRO_TICKERS}
+
+
+def _is_fixed_macro_ticker(ticker: str) -> bool:
+    return ticker.upper() in _FIXED_MACRO_TICKER_KEYS
+
+
+def _ticker_feature_prefix(ticker: str) -> str:
+    return ticker_slug(ticker)
+
+
+def supplementary_ticker_feature_columns(
+    tickers: Iterable[str],
+    suffixes: Iterable[str] = DEFAULT_SUPPLEMENTARY_TICKER_FEATURE_SUFFIXES,
+) -> list[str]:
+    """
+    Return feature columns generated for non-fixed macro tickers.
+
+    Fixed macro tickers already have hand-curated regression features, so this
+    helper only lists the supplemental feature block for additional tickers.
+    """
+    columns: list[str] = []
+    seen: set[str] = set()
+    for ticker in tickers:
+        if _is_fixed_macro_ticker(ticker):
+            continue
+        prefix = _ticker_feature_prefix(ticker)
+        if prefix in seen:
+            continue
+        seen.add(prefix)
+        columns.extend(f"{prefix}_{suffix}" for suffix in suffixes)
+    return columns
+
+
 def download_market_data(config: MarketNewsTrainingConfig) -> pd.DataFrame:
     """
     학습에 사용할 가격 데이터를 다운로드한다.
 
-    기존 `training/train_regression.py`의 입력 가정을 유지하기 위해
-    타깃 ETF 외에 거시 맥락용 자산도 함께 내려받는다.
+    SPY, ^VIX, TLT, HYG, UUP는 피처 계산에 하드코딩된 고정 매크로 티커라
+    config.macro_tickers 설정과 무관하게 항상 다운로드한다.
+    config.macro_tickers에 추가 티커(예: USO)를 넣으면 보충 피처로 활용된다.
     """
-    tickers = [config.target_ticker, *config.macro_tickers]
+    tickers_set = {config.target_ticker, *FIXED_MACRO_TICKERS, *config.macro_tickers}
     raw = yf.download(
-        tickers=tickers,
+        tickers=sorted(tickers_set),
         start=config.start_date,
         end=config.end_date,
         auto_adjust=True,
@@ -120,7 +160,7 @@ def _add_trend_and_distance_features(df: pd.DataFrame) -> list[str]:
         moving_average = price.rolling(window).mean()
         df[f"price_to_ma_{window}"] = price / moving_average - 1.0
 
-    for window in [20, 60, 120, 200]:
+    for window in [5, 20, 60, 120, 200]:
         df[f"slope_{window}"] = np.log(price / price.shift(window)) / window
 
     rolling_max = price.rolling(window=252, min_periods=1).max()
@@ -135,6 +175,7 @@ def _add_trend_and_distance_features(df: pd.DataFrame) -> list[str]:
         "price_to_ma_20",
         "price_to_ma_60",
         "price_to_ma_120",
+        "slope_5",
         "slope_20",
         "slope_60",
         "slope_120",
@@ -178,7 +219,16 @@ def _add_intraday_and_technical_features(df: pd.DataFrame) -> list[str]:
     bb_lower = bb_mid - 2 * bb_std
     df["bb_width"] = (bb_upper - bb_lower) / bb_mid
     df["bb_pos"] = (price - bb_lower) / (bb_upper - bb_lower)
-    df["ret_accel"] = df["ret_1"] - df["ret_5"]
+
+    bb_mid_5 = price.rolling(5).mean()
+    bb_std_5 = price.rolling(5).std()
+    bb_upper_5 = bb_mid_5 + 2 * bb_std_5
+    bb_lower_5 = bb_mid_5 - 2 * bb_std_5
+    df["bb_width_5"] = (bb_upper_5 - bb_lower_5) / bb_mid_5
+    df["bb_pos_5"] = (price - bb_lower_5) / (bb_upper_5 - bb_lower_5)
+
+    # 1일 vs 3일 수익률 차이 → 단기 가속/감속 (train_regression.py 기준)
+    df["ret_accel"] = (df["ret_1"] / 1.0) - (df["ret_3"] / 3.0)
     df["vol_breakout"] = df["ret_1"] / (df["vol_5"] + 1e-9)
     df["bb_high_dist"] = (high_price - bb_upper) / (bb_upper + 1e-9)
 
@@ -191,6 +241,8 @@ def _add_intraday_and_technical_features(df: pd.DataFrame) -> list[str]:
         "macd_hist",
         "bb_width",
         "bb_pos",
+        "bb_width_5",
+        "bb_pos_5",
         "ret_accel",
         "vol_breakout",
         "bb_high_dist",
@@ -227,7 +279,7 @@ def _add_macro_context_features(df: pd.DataFrame) -> list[str]:
     df["vix_ret_5"] = vix.pct_change(5)
     df["vix_to_ma_20"] = vix / vix.rolling(20).mean() - 1.0
     df["vix_z_score"] = _z_score(vix, 20)
-    df["vix_z_score_5"] = (vix - vix.rolling(5).mean()) / (vix.rolling(5).std() + 1e-9)
+    df["vix_z_score_5"] = (vix - vix.rolling(5).mean()) / vix.rolling(5).std()
     df["vix_speed"] = vix.pct_change(3)
 
     df["tlt_ret_1"] = tlt.pct_change(1)
@@ -237,7 +289,9 @@ def _add_macro_context_features(df: pd.DataFrame) -> list[str]:
     df["tlt_shock_5"] = tlt.pct_change(5)
 
     df["hyg_ret"] = hyg.pct_change(10)
+    df["hyg_ret_5"] = hyg.pct_change(5)
     df["uup_ret"] = uup.pct_change(10)
+    df["uup_ret_5"] = uup.pct_change(5)
     df["uup_shock_5"] = uup.pct_change(5)
     df["hyg_z_score"] = _z_score(hyg, 20)
     df["uup_z_score"] = _z_score(uup, 20)
@@ -257,7 +311,9 @@ def _add_macro_context_features(df: pd.DataFrame) -> list[str]:
         "tlt_to_ma_60",
         "tlt_shock_5",
         "hyg_ret",
+        "hyg_ret_5",
         "uup_ret",
+        "uup_ret_5",
         "uup_shock_5",
         "hyg_z_score",
         "uup_z_score",
@@ -284,7 +340,10 @@ def _add_relative_strength_features(df: pd.DataFrame) -> list[str]:
     df["target_tlt_ratio_20"] = df["target_tlt_ratio"] / df["target_tlt_ratio"].rolling(20).mean() - 1.0
     df["target_spy_rel_ret"] = (price / spy).pct_change(10)
     df["target_tlt_rel_ret"] = (price / tlt).pct_change(10)
+    df["target_spy_rel_ret_5"] = (price / spy).pct_change(5)
+    df["target_tlt_rel_ret_5"] = (price / tlt).pct_change(5)
     df["vol_ratio"] = price.pct_change().rolling(10).std() / (spy.pct_change().rolling(10).std() + 1e-9)
+    df["vol_ratio_5"] = price.pct_change().rolling(5).std() / (spy.pct_change().rolling(5).std() + 1e-9)
     df["rel_strength_5"] = price.pct_change(5) - spy.pct_change(5)
 
     return [
@@ -292,14 +351,61 @@ def _add_relative_strength_features(df: pd.DataFrame) -> list[str]:
         "target_tlt_ratio_20",
         "target_spy_rel_ret",
         "target_tlt_rel_ret",
+        "target_spy_rel_ret_5",
+        "target_tlt_rel_ret_5",
         "vol_ratio",
+        "vol_ratio_5",
         "rel_strength_5",
     ]
+
+
+def _add_supplementary_ticker_features(
+    df: pd.DataFrame,
+    raw: pd.DataFrame,
+    supplementary_tickers: tuple[str, ...],
+) -> list[str]:
+    """
+    고정 매크로 5개 외 추가 티커(예: USO, XOP)의 기본 피처를 자동 생성한다.
+
+    생성 피처: {t}_ret_5, {t}_ret_20, {t}_shock_5 (단기/중기 수익률 + 충격)
+    티커가 raw에 없으면 조용히 건너뛴다.
+    """
+    price_field = "Adj Close" if "Adj Close" in raw.columns.get_level_values(0) else "Close"
+    added: list[str] = []
+    seen: set[str] = set()
+
+    for ticker in supplementary_tickers:
+        if _is_fixed_macro_ticker(ticker):
+            continue
+        t = _ticker_feature_prefix(ticker)
+        if t in seen:
+            continue
+        seen.add(t)
+        try:
+            series = _get_series(raw, price_field, ticker)
+        except KeyError:
+            continue
+
+        col_price = f"{t}_price"
+        df[col_price] = series.values
+
+        ret5_col = f"{t}_ret_5"
+        ret20_col = f"{t}_ret_20"
+        shock_col = f"{t}_shock_5"
+
+        df[ret5_col] = series.pct_change(5).values
+        df[ret20_col] = series.pct_change(20).values
+        df[shock_col] = df[ret5_col] / (series.pct_change(20).rolling(20).std().values + 1e-9)
+
+        added.extend([ret5_col, ret20_col, shock_col])
+
+    return added
 
 
 def build_market_feature_frame(
     raw: pd.DataFrame,
     target_ticker: str,
+    supplementary_tickers: tuple[str, ...] = (),
 ) -> tuple[pd.DataFrame, list[str]]:
     """
     가격 원천 데이터를 모델 입력용 시장 피처 테이블로 변환한다.
@@ -320,5 +426,10 @@ def build_market_feature_frame(
     market_feature_columns: list[str] = []
     for builder in feature_builders:
         market_feature_columns.extend(builder(df))
+
+    if supplementary_tickers:
+        market_feature_columns.extend(
+            _add_supplementary_ticker_features(df, raw, supplementary_tickers)
+        )
 
     return df, market_feature_columns

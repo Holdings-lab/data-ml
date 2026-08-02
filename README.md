@@ -1,591 +1,357 @@
 # Data-ML Pipeline
 
-이 저장소는 정책/거시 뉴스 수집부터 뉴스 후처리, 시장 데이터 피처 생성, XGBoost 학습과 비교 실험까지 한 번에 관리하는 데이터 파이프라인 프로젝트.
+최종 점검일: 2026-05-26. 이 README는 현재 코드와 `data/training/**/metadata.json`, 비교 JSON, 클러스터 리포트를 다시 읽고 맞춘 기준이다.
 
-현재 코드 기준으로는 `shared/` 아래 파이프라인이 메인 실행 경로이고, `training/`과 `crawler/support_legacy/`는 초기 실험 또는 레거시 호환 코드로 분리함.
+이 저장소는 정책/거시 뉴스 수집, 뉴스 후처리, 시장 가격 피처 생성, XGBoost 회귀 학습, market-only와 market-news 비교, 예측 수익률 profile 리포트까지 관리하는 실험 파이프라인이다. 현재 메인 실행 경로는 `shared/` 아래 코드이고, `crawler/support_legacy/`와 `TEST/`는 보조/레거시 성격이 강하다.
 
-## 프로젝트 목적(데모)
+## 프로젝트 목적
 
-- 정책/거시 이벤트 문서를 크롤링해 학습 가능한 형태로 정리.
-- QQQ와 거시 자산 데이터를 함께 사용해 가격 예측용 피처 생성.
-- `market_only`와 `market_news` 두 실험을 같은 절차로 학습해 성능을 비교.
-- 여기에 `market_news`도 추가. (뉴스데이터와, 주가데이터 날짜 일치)
+이 프로젝트의 목적은 뉴스 문서 자체를 모델에 직접 넣는 것이 아니라, 정책/거시 문서에서 날짜별 신호를 뽑아 시장 데이터와 결합한 뒤 가격 방향성과 미래 가격을 예측해 보는 것이다.
 
-## 프로젝트 개요(대략적인 프로젝트 파이프라인)
+현재 파이프라인은 크게 세 가지 질문에 답하도록 구성되어 있다.
 
-1. Crawler/collectors/fed.py, crawler/collectors/whitehouse.py, crawler/collectors/bis.py 실행해서 원문 문서 모음
-    * 이 단계에서는  FOMC 문서, White House 정책 문서, BIS 보도자료를 CSV 형태로 저장하는것 -> 결과는 data/crawler/collected/ 아래에 쌓임.
+- 가격/거시 피처만 사용한 `market_only` 모델은 어느 정도 성능을 내는가?
+- 정책/거시 뉴스 신호와 본문 임베딩을 추가한 `market_news` 모델은 같은 조건에서 나아지는가?
+- `market_news` 모델이 상승/하락을 예측하는 구간은 어떤 시장/뉴스 profile을 갖는가?
 
+그래서 최종 산출물은 단순히 모델 파일 하나가 아니라, 학습 metadata, 예측 결과, baseline 비교, aligned comparison, 예측 수익률 profile 리포트까지 함께 남긴다. 성능 숫자만 보는 것보다 “어떤 구간에서 어떤 신호를 보고 예측했는지”를 같이 추적하기 위한 구조다.
 
-2. 수집한 문서를 학습 가능한 형태로 정리하는 단계
-    * crawler/postprocessing/text_summarizer.py -> 너무 긴 본문을 Ollama를 이용해서 요약해서 길이를 줄이는 역할
-    * crawler/postprocessing/proprocessing.py -> 여러 수집 결과 CSV를 하나로 합치면서 날짜, 카테고리, 문서 타입, 본문 길이 같은 컬럼을 정리
-    * crawler/postprocessing/sentiment_score.py -> FinBERT를 사용해 제목과 본문에 감성 점수를 붙여 최종적으로 merged_finbert.csv 생성
-* 이 과정을 거쳐서 모델이 읽을 수 있는 수치화된 뉴스데이터로 변환
+## 지금 기준 핵심
 
+- 메인 엔트리포인트는 `shared/run_market_news_training.py`.
+- 기본 실행은 `--target-ticker QQQ --ticker-preset auto`와 같다.
+- 티커별 자동 프리셋은 `shared/config/ticker_presets.py`에서 관리한다.
+- 뉴스 입력 기본 경로는 `data/crawler/features/{ticker}/merged_finbert_with_embeddings.csv`.
+- 뉴스 입력에는 `body_summary_embedding` 컬럼이 필요하고, 현재 학습 코드는 이를 `body_emb_0~29`로 펼친 뒤 train split에서만 `StandardScaler + PCA(5)`를 fit한다.
+- `market_news` 학습 피처는 "티커 프리셋 시장 피처 + 스칼라 뉴스 피처 12개 + 임베딩 PCA 5개" 구조다.
+- 예측 수익률 profile은 KMeans가 아니다. `market_news` 회귀 모델의 예측 미래 가격을 현재가와 비교해 수익률 구간 label을 만들고, label별 시장/뉴스 profile centroid를 요약한다.
+- 최신 `market_model_comparison.json`은 `--market-news-only` 실행으로 덮여서 market-only baseline이 빠져 있다. baseline 비교는 현재 `market_model_comparison_aligned.json` 또는 각 `metadata.json`을 같이 봐야 한다.
 
-3. 학습단계
-    * shared/run_market_news_training.py: merged_finbert.csv를 입력으로 받아 전체 파이프라인 실행
-    * 맹점은 모델이 문서 한건한건을 직접 읽는 것이 아니라, 하루 단위로 압축된 뉴스 신호를 사용한다는 것.
-        * 예를 들어
-        * 어떤 날짜에는 뉴스가 몇 건 있었는지
-        * 부정 뉴스 비율이 높았는지
-        * FOMC 관련 문서가 있었는지
-        * 최근 3일과 5일 평균 감성이 어땠는지 같은 값으로 변환한 뒤 시장 데이터와 합친다. 
-
-
-4. 정리하면
-    * 뉴스 피처가 이미 준비된 상태에서 모델 성능만 보고 싶으면 : python shared/run_market_news_training.py만 실행
-    * 데이터부터 새로 만들고 싶으면 : collectors -> text_summarizer -> proprocessing -> sentiment_score -> run_market_news_training 순서대로 실행
-    * 다만 현재 코드 기준으로 text_summarizer.py는 기본 입력이 BIS 파일 쪽에 맞춰져 있어서, FOMC나 White House 요약까지 자동으로 한 번에 돌리는 구조는 아님. 
-
-
-## 핵심 실행 흐름
-
-1. `crawler/collectors/`
-   외부 사이트에서 원문 문서를 수집.
-2. `crawler/postprocessing/`
-   긴 문서를 요약하고, 소스별 CSV를 병합하고, 각 소스별 감정 점수 추가.
-3. `shared/news/`
-   문서 단위 뉴스 데이터를 날짜별 숫자 피처로 집계.
-4. `shared/market/`
-   QQQ와 거시 자산 가격 데이터를 내려받아 시장 피처를 생성.
-5. `shared/training/`
-   horizon 선택, 피처 선택, Optuna 튜닝, XGBoost 학습과 평가를 수행.
-6. `data/`
-   중간 산출물과 최종 모델, 메타데이터, 비교 결과를 저장.
-
-## 디렉터리 구조
+전체 흐름을 한 줄로 쓰면 아래와 같다.
 
 ```text
-data-ml/
-├─ crawler/
-│  ├─ collectors/
-│  │  ├─ fed.py
-│  │  ├─ bis.py
-│  │  └─ whitehouse.py
-│  ├─ postprocessing/
-│  │  ├─ text_summarizer.py
-│  │  ├─ proprocessing.py
-│  │  └─ sentiment_score.py
-│  └─ support_legacy/
-│     ├─ data_paths.py
-│     ├─ pipeline.py
-│     ├─ run_crawler.py
-│     ├─ scraper.py
-│     └─ crawling_test.py
-├─ data/
-│  ├─ crawler/
-│  │  ├─ collected/
-│  │  ├─ summarized/
-│  │  └─ features/
-│  └─ training/
-│     ├─ market_only/
-│     ├─ market_news/
-│     └─ comparison/
-├─ shared/
-│  ├─ common/
-│  ├─ config/
-│  ├─ market/
-│  ├─ news/
-│  ├─ pipelines/
-│  ├─ training/
-│  └─ run_market_news_training.py
-├─ training/
-├─ requirements.txt
-└─ README.md
+raw policy/news documents
+-> summarized/normalized news table
+-> FinBERT sentiment + body summary embedding
+-> daily news feature table
+-> market feature frame
+-> XGBoost market_only / market_news experiments
+-> comparison + predicted return profile report
 ```
+
+중요한 점은 `market_news` 모델이 개별 문서 한 건을 직접 읽는 구조가 아니라는 것이다. 예를 들어 “오늘 FOMC 문서가 있었는가”, “최근 5일 뉴스 수가 늘었는가”, “본문 감성이 최근 며칠 동안 어떤 방향으로 움직였는가”, “본문 임베딩이 어떤 PCA 좌표에 가까운가” 같은 숫자형 신호로 압축한 뒤 시장 가격 피처와 합친다.
+
+## 티커 프리셋
+
+| 대상 | auto preset | 시장 피처 | 매크로/보조 티커 | horizon 후보 | Optuna |
+| --- | --- | ---: | --- | --- | ---: |
+| QQQ | `qqq_growth_tech` | 34 | SPY, ^VIX, TLT, HYG, UUP, XLK, SOXX, IWM | 5, 7, 10, 15 | 200 |
+| XLE | `xle_energy` | 25 | SPY, ^VIX, TLT, HYG, UUP, USO, XOP, OIH, XLB | 3, 5, 10, 20 | 30 |
+| XLF | `xlf_financials` | 37 | SPY, ^VIX, TLT, HYG, UUP, KBE, KRE, KIE, IAI | 3, 5, 10, 20 | 30 |
+| 기타 | `default` | 20 | SPY, ^VIX, TLT, HYG, UUP | 5, 7, 10, 15 | 200 |
+
+QQQ의 34개 시장 피처는 base 20개, 성장/기술 섹터용 5개, XLK/SOXX/IWM 보충 피처 9개로 구성된다. XLE의 현재 코드상 auto preset은 에너지 섹터 피처 25개를 고정으로 사용하고, XLF는 금융 섹터 피처 37개를 사용한다.
+
+프리셋은 단순히 이름만 바꾸는 옵션이 아니다. `target_ticker`, 매크로 티커 목록, 시장 피처 목록, horizon 후보, Optuna trial 수, random seed를 함께 정해 준다. 따라서 QQQ, XLE, XLF를 같은 CLI로 실행해도 실제로 쓰는 시장 문맥은 다르다.
+
+예를 들어 QQQ는 성장/기술주 문맥을 더 보기 위해 XLK, SOXX, IWM 보충 피처를 붙인다. XLE는 에너지 ETF라서 USO, XOP, OIH, XLB 쪽 피처가 들어가고, XLF는 금융 ETF라서 KBE, KRE, KIE, IAI 쪽 피처가 들어간다. 이런 차이를 `shared/config/ticker_presets.py`에 모아 둔 이유는 새 티커를 추가할 때 실험 설정과 출력 경로가 서로 섞이지 않게 하기 위해서다.
+
+## 실행 흐름
+
+1. `crawler/collectors/`
+   FOMC, BIS, UCSB Presidency Project 문서를 수집한다. 정책 문서 쪽은 현재 `ucsb.py`와 `policy_monitor.py`가 담당한다.
+2. `crawler/postprocessing/`
+   문서 병합, 요약, FinBERT 감성, sentence-transformer 임베딩, PCA 축소를 처리한다. 현재 병합 스크립트는 `preprocessing.py`다.
+3. `shared/news/`
+   문서 단위 뉴스를 거래일 단위 숫자 피처로 집계하고 시장 프레임에 붙인다.
+4. `shared/market/`
+   yfinance로 타깃/매크로 가격을 내려받고 시장 피처를 만든다.
+5. `shared/training/`
+   지도학습 프레임 생성, XGBoost 튜닝, 평가, metadata/predictions/model 저장을 처리한다.
+6. `shared/cluster/`
+   `market_news` 예측 수익률을 5개 label로 나누고 profile 리포트와 PNG 시각화를 만든다.
 
 ## 주요 파일 가이드
 
-### 메인 파이프라인
+처음 코드를 읽을 때는 모든 파일을 한 번에 보려고 하기보다, 실행 진입점부터 아래 순서로 내려가는 편이 편하다.
 
 - `shared/run_market_news_training.py`
-  가장 먼저 실행하면 되는 메인 CLI 엔트리포인트.(그냥 실행해도 되고, 명령어로 실행해도됨 -> 밑에 설명)
+  CLI 인자를 config로 바꾸고 전체 파이프라인을 실행한다. `--target-ticker`, `--ticker-preset`, `--market-news-only` 같은 사용자-facing 옵션은 여기서 확인하면 된다.
+- `shared/config/ticker_presets.py`
+  티커별 시장 피처와 매크로 티커 구성을 관리한다. 현재 QQQ/XLE/XLF 차이가 여기서 갈린다.
+- `shared/config/schema.py`
+  경로와 학습 기본값을 담은 `MarketNewsTrainingConfig`가 있다. 티커별 출력 경로도 여기서 생성된다.
 - `shared/pipelines/market_news.py`
-  뉴스 로드, 시장 피처 생성, 두 실험 학습, 비교 저장까지의 전체 순서를 관리.
+  뉴스 로드, 시장 피처 생성, market-only 학습, market-news 학습, aligned comparison, profile 리포트 생성을 연결하는 오케스트레이션 레이어다.
+- `shared/market/data.py`
+  yfinance 데이터 다운로드와 수익률/변동성/기술적 지표/상대강도/보충 티커 피처 생성을 담당한다.
+- `shared/news/features.py`
+  원본 뉴스 CSV를 읽고 `body_summary_embedding`을 `body_emb_*` 컬럼으로 펼친 뒤 날짜별로 집계한다.
+- `shared/news/merge.py`
+  시장 프레임과 일자별 뉴스 피처를 붙이고, 뉴스 결측/감쇠/rolling 파생 피처를 만든다.
 - `shared/training/xgboost_pipeline.py`
-  horizon 선택, 피처 선택, Optuna 튜닝, 최종 모델 학습과 평가 수행.
+  supervised frame 생성, train/test split, Optuna 튜닝, XGBoost 학습, 평가 지표와 predictions 저장을 처리한다.
+- `shared/cluster/model.py`, `shared/cluster/visualize.py`
+  예측 수익률 label별 profile 데이터셋, 대표 뉴스, feature ranking, PNG 시각화를 만든다.
 
-### 뉴스 수집
+## 빠른 실행
 
-- `crawler/collectors/fed.py`
-  FOMC statement, minutes, implementation note를 수집.
-- `crawler/collectors/bis.py`
-  BIS 보도자료 목록을 Selenium으로 탐색하고 상세 본문을 수집.
-- `crawler/collectors/whitehouse.py`
-  White House 문서를 수집한 뒤 QQQ 관련 키워드가 포함된 정책 문서만 남김.
-
-### 뉴스 후처리
-
-- `crawler/postprocessing/text_summarizer.py`
-  긴 본문을 Ollama 기반 로컬 LLM으로 요약.
-- `crawler/postprocessing/proprocessing.py`
-  수집 결과를 표준 컬럼으로 병합하고 카테고리/시간 피처를 추가.
-- `crawler/postprocessing/sentiment_score.py`
-  FinBERT로 제목/본문 감성 점수를 계산해 최종 뉴스 피처 CSV를 생성.
-
-### 레거시/실험 코드
-
-- `training/train_regression.py`
-  초기 단일 회귀 실험 코드.
-- `training/dataset.py`
-  QQQ 단일 종목 기반 분류 실험 코드.
-- `crawler/support_legacy/`
-  경로 유틸과 예전 실행 진입점, 간단한 테스트 케이스들을 포함.
-
-## 산출물 저장 위치
-
-### 뉴스 관련
-
-- `data/crawler/collected/`
-  크롤러 원문 수집 결과 CSV
-- `data/crawler/summarized/`
-  요약이 적용된 문서 CSV
-- `data/crawler/features/`
-  병합, 시간 피처, 감성 점수까지 포함된 학습용 뉴스 CSV
-
-### 학습 관련
-
-- `data/training/market_only/`
-  시장 피처만 사용한 실험 결과
-- `data/training/market_news/`
-  시장 + 뉴스 피처를 사용한 실험 결과
-- `data/training/comparison/`
-  두 실험의 성능 비교 CSV/JSON
-
-## 코드 실행 가이드
-
-아래 명령은 모두 프로젝트 루트(`data-ml/`)에서 실행하는 것을 기준으로 작성.
-
-### 1. 가상환경 및 기본 패키지 설치(Mac OS 사용시 추천)
+이미 티커별 뉴스 임베딩 CSV가 준비되어 있다면 프로젝트 루트에서 실행한다.
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python shared/run_market_news_training.py --target-ticker QQQ --ticker-preset auto
+python shared/run_market_news_training.py --target-ticker XLE --ticker-preset auto
+python shared/run_market_news_training.py --target-ticker XLF --ticker-preset auto
 ```
 
-### 2. 추가 패키지 설치
-
-크롤러/후처리까지 모두 실행하려면 아래 패키지를 추가로 설치해야 함.
+market-news 모델만 빠르게 다시 돌릴 때:
 
 ```bash
-pip install selenium transformers certifi
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
-
-참고:
-
-- `crawler/collectors/bis.py`는 Selenium과 로컬 Chrome/Chromium 환경이 필요.
-- `crawler/postprocessing/text_summarizer.py`는 로컬 Ollama 서버가 실행 중이어야 함.
-- `crawler/postprocessing/sentiment_score.py`는 `torch`와 `transformers`가 필요함.
-
-## 빠른 실행 시나리오
-
-### A. 이미 뉴스 피처 CSV가 있을 때 학습만 바로 실행
-
-`data/crawler/features/merged_finbert.csv`가 이미 준비되어 있다면 아래 한 줄로 메인 학습 파이프라인 실행 가능.
-
-```bash
-python shared/run_market_news_training.py
-```
-
-실행이 끝나면 기본적으로 아래 산출물들이 생성됨.(현재 data 폴더안에 생성되어있음)
-
-- `data/training/market_only/qqq_market_only_xgboost_model.json`
-- `data/training/market_only/qqq_market_only_metadata.json`
-- `data/training/market_news/qqq_market_news_xgboost_model.json`
-- `data/training/market_news/qqq_market_news_metadata.json`
-- `data/training/comparison/qqq_market_model_comparison.csv`
-- `data/training/comparison/qqq_market_model_comparison.json`
-
-### B. 뉴스 수집부터 학습까지 전체 파이프라인 실행
-
-#### Step 1. 뉴스 원문 수집
-
-```bash
-python crawler/collectors/fed.py
-python crawler/collectors/whitehouse.py
-python crawler/collectors/bis.py --max-pages 9
-```
-
-기본 출력 위치:
-
-- `data/crawler/collected/fed_fomc_links.csv`
-- `data/crawler/collected/whitehouse_qqq_policy.csv`
-- `data/crawler/collected/bis_press_releases.csv`
-
-#### Step 2. 긴 문서 요약
-
-```bash
-python crawler/postprocessing/text_summarizer.py
-```
-
-현재 구현 기준 주의사항:
-
-- `text_summarizer.py`의 기본 `INPUT_CSV`와 `OUTPUT_CSV`는 BIS 파일 기준으로 고정되어 있음.
-- `proprocessing.py`는 아래 세 파일이 모두 준비되어 있다고 가정.
-  - `data/crawler/summarized/fed_fomc_links_summarized.csv`
-  - `data/crawler/summarized/whitehouse_qqq_policy_summarized.csv`
-  - `data/crawler/summarized/bis_press_releases_summarized.csv`
-- 따라서 FOMC/White House 쪽도 요약 산출물이 필요하면 스크립트 상단 상수를 바꿔 같은 방식으로 다시 실행해야 함.
-
-#### Step 3. 수집 결과 병합 및 시간 피처 생성
-
-```bash
-python crawler/postprocessing/proprocessing.py
-```
-
-생성 파일:
-
-- `data/crawler/features/merged_table_sorted.csv`
-- `data/crawler/features/merged_table_sorted_encoded.csv`
-- `data/crawler/features/merged_table_sorted_time_features.csv`
-
-#### Step 4. FinBERT 감성 점수 계산
-
-```bash
-python crawler/postprocessing/sentiment_score.py
-```
-
-생성 파일:
-
-- `data/crawler/features/merged_finbert.csv`
-
-#### Step 5. 메인 학습 파이프라인 실행
-
-```bash
-python shared/run_market_news_training.py
-```
-
-## 학습 파이프라인 옵션 예시
-
-기본값 대신 일부 설정을 바꿔 실행할 수도 있음.(종목, 날짜값 등 변경 가능하게)
-
-```bash
-python shared/run_market_news_training.py \
-  --target-ticker QQQ \
-  --start-date 2016-01-01 \
-  --end-date 2026-01-01 \
-  --horizons 5,10,15,20 \
-  --optuna-trials 30 \
-  --top-feature-count 20
+python shared/run_market_news_training.py --target-ticker QQQ --market-news-only
+python shared/run_market_news_training.py --target-ticker XLE --market-news-only
+python shared/run_market_news_training.py --target-ticker XLF --market-news-only
 ```
 
 주요 옵션:
 
-- `--target-ticker`
-  예측 대상 티커
-- `--start-date`, `--end-date`
-  시장 데이터 다운로드 구간
-- `--news-input`
-  입력 뉴스 피처 CSV 경로
-- `--horizons`
-  비교할 예측 horizon 후보
-- `--optuna-trials`
-  하이퍼파라미터 탐색 횟수
-- `--top-feature-count`
-  최종 후보로 남길 상위 중요 피처 개수
+- `--target-ticker`: 예측 대상 티커. 예: `QQQ`, `XLE`, `XLF`
+- `--ticker-preset`: `auto`, `none`, `default`, `qqq_legacy`, `qqq_growth_tech`, `xle_energy`, `xlf_financials`
+- `--news-input`: 기본값 대신 사용할 뉴스 임베딩 CSV
+- `--horizons`: 쉼표 구분 horizon 후보
+- `--training-embedding-pca-components`: 학습용 `body_emb_*` PCA 차원. 기본값 5
+- `--market-news-only`: market-only와 aligned comparison을 건너뛰고 market-news와 cluster 산출물만 갱신
 
-## 추천 읽기 순서
+`--market-news-only`는 피처 수정이나 임베딩 처리 수정처럼 `market_news` 쪽만 빠르게 반복 확인할 때 유용하다. 대신 이 모드에서는 market-only baseline과 aligned comparison이 새로 만들어지지 않으므로, 두 모델을 공정하게 비교해야 하는 최종 확인 단계에서는 플래그 없이 다시 실행하는 것이 맞다.
 
-처음 프로젝트를 파악할 때는 아래 순서로 읽는 것을 추천.
+기본 실행이 끝나면 티커별로 대략 아래 파일들이 생긴다.
 
-1. `shared/run_market_news_training.py`
-2. `shared/pipelines/market_news.py`
-3. `shared/market/data.py`
-4. `shared/news/features.py`
-5. `shared/news/merge.py`
-6. `shared/training/xgboost_pipeline.py`
+- `data/training/{ticker}/market_only/metadata.json`
+- `data/training/{ticker}/market_only/predictions.csv`
+- `data/training/{ticker}/market_news/metadata.json`
+- `data/training/{ticker}/market_news/predictions.csv`
+- `data/training/{ticker}/comparison/market_model_comparison_aligned.json`
+- `data/training/{ticker}/comparison/volatility_cluster_report.json`
+- `data/training/{ticker}/comparison/cluster_visualization.png`
 
-## 현재 코드 기준 메모
+## 수집/후처리 실행
 
-- 메인 학습 파이프라인은 `shared/` 아래에 정리.
-- `training/` 폴더는 실험, 테스트용 코드로 사용. 새로운 작업은 가급적 `shared/` 기준으로 진행하는 것이 좋을듯.
-- 결과 CSV는 `.gitignore`에 의해 기본적으로 Git 추적 대상에서 제외.
-
-## `train_regression.py` 코드가 `shared/`에 반영된 방식
-
-현재 `shared/` 메인 학습은 `training/train_regression.py`를 가능한 한 그 코드 그대로 가져와서 모듈화한 버전으로 보면 됨.
-
-쉽게 말하면:
-
-- `training/train_regression.py`
-  한 파일 안에서 데이터 다운로드 -> 피처 생성 -> 뉴스 병합 -> 학습 -> 평가까지 한 번에 처리하는 원본 실험 코드
-- `shared/`
-  위 흐름을 파일별로 나눠서 유지보수하기 쉽게 만든 구조
-  대신 메인 실험 설정은 원본 스크립트와 최대한 같게 맞춰 둠
-
-### 1. 메인 실험 자체를 `train_regression.py`처럼 고정 설정으로 돌림
-
- 메인 실험 기준으로 아래처럼 바뀜.
-
-- `market_only`
-  `train_regression.py`에서 쓰는 시장 정예 피처만 사용
-- `market_news`
-  위 시장 정예 피처 + 뉴스 감성 정예 피처만 사용
-- 기본 horizon
-  `15일` 고정
-
-
-참고:
-
-- 이 고정 horizon 값은 `shared/config/schema.py`의 `regression_style_fixed_horizon = 15`
-- CLI에서는 `--regression-style-fixed-horizon`으로 바꿀 수 있음
-
-### 2. 시장 피처는 `train_regression.py`의 정예 피처 기준으로 맞춤
-
-`shared/market/data.py`에는 원래 다양한 시장 피처가 많지만, 실제 메인 학습에서 사용하는 피처는 `train_regression.py` 기준 정예 목록으로 제한함.
-
-현재 메인 학습에 쓰는 시장 피처:
-
-- `ret_5`
-- `ret_accel`
-- `dist_to_ma5`
-- `bb_pos`
-- `rsi_14`
-- `vol_shock`
-- `vix_z_score_5`
-- `drawdown`
-- `vol_ratio`
-- `rel_strength_5`
-- `uup_shock_5`
-- `tlt_shock_5`
-- `hyg_ret`
-- `target_spy_rel_ret`
-
-특히 아래 계산식은 원본에 맞춰 반영함.
-
-- `ret_accel = ret_1 - ret_5`
-- `vol_shock = vol_5 / (vol_20 + 1e-9)`
-- `dist_to_ma5 = price / MA(5) - 1`
-- `rel_strength_5 = QQQ 5일 수익률 - SPY 5일 수익률`
-- `uup_shock_5 = UUP 5일 변화율`
-- `tlt_shock_5 = TLT 5일 변화율`
-- `vix_z_score_5 = 5일 기준 VIX z-score`
-
-즉 `shared` 안에 다른 피처가 더 남아 있더라도, 메인 실험이 실제로 보는 핵심 시장 피처는 `train_regression.py`와 거의 같은 세트라고 보면 됨.
-
-### 3. 뉴스 일자 집계도 `train_regression.py` 흐름으로 맞춤
-
-`train_regression.py`에서는 `merged_finbert.csv`를 읽은 뒤:
-
-1. 필요한 뉴스 컬럼만 선택
-2. 주말 뉴스를 다음 월요일로 이동
-3. 같은 날짜 뉴스는 평균을 내어 하루 1행으로 압축
-
-현재 `shared/news/features.py`도 같은 생각으로 동작함.
-
-반영된 규칙:
-
-- 주말 뉴스는 다음 영업일(월요일)로 이동
-- 같은 날짜 뉴스는 평균값으로 압축
-- 주요 입력 컬럼은 아래와 같은 `train_regression.py` 스타일 컬럼
-  - `category_BIS`
-  - `category_FOMC`
-  - `category_White House`
-  - `day_of_week_sin`, `day_of_week_cos`
-  - `month_sin`, `month_cos`
-  - `is_weekend`
-  - `title_positive_prob`, `title_negative_prob`, `title_neutral_prob`
-  - `title_sentiment_score`
-  - `body_positive_prob`, `body_negative_prob`, `body_neutral_prob`
-  - `body_sentiment_score`
-  - `body_n_chunks`
-
-차이점이 있다면, `shared`는 이 작업을 `load_news_source_table()`과 `build_daily_news_feature_table()` 두 단계로 나눠둔 것뿐임.
-
-### 4. 뉴스 병합과 결측 처리 순서도 최대한 그대로 맞춤
-
-`shared/news/merge.py`는 지금 `train_regression.py`의 병합 흐름을 거의 그대로 따름.
-
-현재 순서:
-
-1. 시장 데이터와 뉴스 일자 테이블을 날짜 기준 `left join`
-2. `title_neutral_prob`, `body_neutral_prob`는 기본값 `1.0`
-3. 주요 뉴스/감성 컬럼은 `ffill()` 후 `0.0`
-4. 그 다음 전체 프레임도 다시 `ffill()` 후 `0.0`
-
-이건 사실상 `train_regression.py`의 아래 의도를 그대로 가져온 것임.
-
-- 뉴스가 없는 날은 중립값으로 둠
-- 뉴스 관련 값은 직전 값 흐름을 어느 정도 이어받게 함
-- 그래도 처음 구간은 `0`으로 마감
-
-### 5. 뉴스 파생 피처도 원본 스크립트의 핵심 4개를 그대로 씀
-
-현재 메인 `market_news` 실험에서 쓰는 뉴스 피처는 아래 4개임.
-
-- `sentiment_gap`
-- `body_sentiment_gap`
-- `sentiment_shock`
-- `body_sentiment_score`
-
-즉 원본의 아래 아이디어를 그대로 따라간 것.
-
-- 제목 긍정/부정 차이
-- 본문 긍정/부정 차이
-- 최근 평균 대비 감성 충격
-- 본문 감성 점수 자체
-
-추가로 `shared`에서는 aligned comparison 시작일 계산을 위해 `news_count_lag1` 보조 컬럼도 남겨 둠.
-이 컬럼은 메인 뉴스 피처라기보다 비교 구간을 자르는 데 쓰는 운영용 컬럼이라고 보면 됨.
-
-### 6. 학습 타깃과 Optuna 목적함수도 `train_regression.py` 기준
-
-`shared/training/xgboost_pipeline.py`에 반영된 핵심은 아래와 같음.
-
-- 타깃 로그수익률을 `* 100` 스케일로 학습
-- 미래 가격 복원 시 `exp(pred_logret / 100.0)` 사용
-- Optuna 탐색 범위:
-  - `n_estimators: 100 ~ 500`
-  - `max_depth: 4 ~ 6`
-  - `learning_rate: 0.01 ~ 0.1`
-  - `subsample: 0.5 ~ 0.9`
-  - `colsample_bytree: 0.5 ~ 0.9`
-- 목적함수:
-  - `direction_accuracy - rmse * 0.1`
-
-즉 지금 `shared`의 메인 학습은 모델 튜닝 관점에서도 `train_regression.py`와 거의 같은 기준으로 움직임.
-
-### 7. 아직 `shared/`에만 남겨둔 구조적 차이
-
-완전히 똑같이 복붙한 것은 아님.
-차이는 "실험 구조" 쪽에만 남겨 둔 상태.
-
-- `shared`는 `market_only`와 `market_news`를 같은 실행에서 같이 돌림
-- 결과를 `data/training/market_only/`, `market_news/`, `comparison/`에 나눠 저장
-- aligned comparison을 따로 만들어 공정 비교를 계속 볼 수 있게 함
-
-중요한 점:
-
-- 메인 두 실험은 `train_regression.py` 스타일 고정 horizon/고정 피처를 사용
-- 반면 aligned comparison은 `--horizons`에 들어온 후보 horizon들에 대해 같은 피처 세트로 다시 비교함
-
-즉 현재 구조를 한 문장으로 정리하면:
-
-- 메인 모델 학습 로직은 `train_regression.py`를 거의 그대로 따르고
-- shared는 그 위에 비교 실험과 저장 구조만 얹어 둔 상태라고 보면 됨.
-
-### 8. 아직 옮기지 않은 부분
-
-아래 요소들은 아직 `shared` 메인 파이프라인에는 넣지 않음.
-
-- importance plot 시각화
-- threshold별 전략 곡선
-- 고확신 구간 상승/하락 정밀 분석
-- 산점도, 누적수익률, 에러 분포 시각화
-
-즉 "모델을 학습하고 비교하는 코어 로직"은 대부분 옮겼고,
-"실험 분석용 시각화/리포트 코드"는 아직 `train_regression.py` 쪽에 더 많이 남아 있음.
-
-그래서:
-
-- 최종모델 결과물 생성과 비교는 `shared`에 저장하고
-- 모델 수정하면서 진행하는 분석은 `training/train_regression.py`
-
-이렇게 역할을 나눠서 작업해보면 될듯.
-
-
-## 최신 실험 결과(2026.04.01)
-
-아래 결과는 프로젝트 루트에서 다음 명령으로 실행한 최신 산출물 기준.
+개별 수집:
 
 ```bash
-./venv/bin/python shared/run_market_news_training.py --horizons 10,20 --optuna-trials 10
+python crawler/collectors/fed.py
+python crawler/collectors/ucsb.py --start-date 2017-01-01
+python crawler/collectors/bis.py --max-pages 10
 ```
 
-### 1. 기본 비교 결과
+하루 단위 모니터링 수집과 통합 후처리:
 
-출력 파일:
+```bash
+python crawler/collectors/policy_monitor.py --max-cycles 1 --interval-sec 0
+```
 
-- `data/training/comparison/qqq_market_model_comparison.csv`
-- `data/training/comparison/qqq_market_model_comparison.json`
+주의: 현재 `policy_monitor.py`의 `run_monitor()` 안에는 테스트용 `target_date_value = datetime(2026, 3, 18).date()` 고정값이 남아 있다. 실제 매일 모니터링으로 쓰려면 `_target_policy_news_date()` 경로로 되돌려야 한다.
 
-결과 요약:
+레거시 배치 후처리:
 
-| experiment_name | best_horizon | direction_accuracy | rmse | mae | r2_score | mape |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| market_only | 10 | 60.98% | 17.3639 | 13.3083 | 0.9285 | 2.7178 |
-| market_news | 20 | 71.29% | 22.9058 | 17.7965 | 0.8746 | 3.6617 |
-| market_news - market_only | +10 | +10.31%p | +5.5418 | +4.4882 | -0.0539 | +0.9440 |
+```bash
+python crawler/postprocessing/preprocessing.py
+python crawler/postprocessing/sentiment_score.py
+python crawler/postprocessing/sentence_transformer.py
+```
 
-해석:
+추가 의존성:
 
-- 이 비교만 보면 `market_news`가 방향 정확도는 더 높게 나옴.
-- 하지만 `market_only`는 10거래일 예측, `market_news`는 20거래일 예측이라 완전한 동일 조건 비교는 아님.
-- 따라서 위 표는 참고용으로 보고, 실제 결론은 아래 aligned comparison 기준으로 판단하는 것이 좋음.
+```bash
+pip install selenium transformers sentence-transformers certifi joblib
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
 
-### 2. 공정 비교 결과 (Aligned Comparison)
+`requirements.txt`에는 메인 학습에 필요한 기본 패키지만 들어 있다. BIS 수집은 Selenium/Chrome 환경, 요약은 로컬 Ollama, 감성과 임베딩은 PyTorch/HuggingFace 계열 패키지가 필요하다.
 
-출력 파일:
+후처리 쪽은 두 갈래가 남아 있다.
 
-- `data/training/comparison/qqq_market_model_comparison_aligned.csv`
-- `data/training/comparison/qqq_market_model_comparison_aligned.json`
+- 기존 배치 흐름:
+  `preprocessing.py -> sentiment_score.py -> sentence_transformer.py` 순서로 CSV를 단계별로 만든다.
+- 통합 모니터링 흐름:
+  `policy_monitor.py`가 새 문서를 수집한 뒤 `crawler/postprocessing/unified_pipeline.py`를 호출해 요약, 인코딩, 감성, 임베딩을 한 번에 적용한다.
 
-aligned comparison은 다음 조건으로 비교:
+메인 학습 관점에서 최종적으로 필요한 것은 티커별 `data/crawler/features/{ticker}/merged_finbert_with_embeddings.csv`다. 이 파일에 `body_summary_embedding`이 없거나, 값이 비어 있거나, 행마다 임베딩 차원이 다르면 `shared/news/features.py`에서 바로 오류를 내도록 되어 있다.
 
-- 뉴스가 실제로 존재하는 구간만 사용
-- 시작일: `2019-03-22`
-- 같은 거래일끼리 `market_only`와 `market_news`를 직접 비교
+## 학습 피처
 
-결과 요약:
+### 시장 피처
 
-| shared_horizon | market_only direction | market_news direction | direction delta | rmse delta | mae delta | r2 delta | mape delta |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 10 | 60.18% | 57.23% | -2.95%p | +0.2294 | +0.2947 | -0.0031 | +0.0538 |
-| 20 | 67.95% | 66.77% | -1.19%p | +0.2384 | +0.1286 | -0.0044 | +0.0264 |
+시장 피처는 타깃 ETF 가격 자체의 최근 움직임과 거시 자산 문맥을 같이 담는다.
 
-해석:
+기본 20개 피처는 `ret_3`, `ret_5`, `ret_accel`, `price_to_ma_5`, `slope_5`, `bb_pos_5`, `bb_width_5`, `macd_hist`, `rsi_14`, `vol_5`, `vol_shock`, `vix_z_score_5`, `drawdown`, `vol_ratio_5`, `rel_strength_5`, `uup_ret_5`, `tlt_shock_5`, `hyg_ret_5`, `target_spy_rel_ret_5`, `target_tlt_rel_ret_5`다.
 
-- `10일`, `20일` 모두에서 현재 `market_news`가 `market_only`보다 약간 성능이 낮음.
-- 방향 정확도도 소폭 낮고, RMSE/MAE/MAPE도 모두 조금 더 큼.
-- 즉 현재 데이터와 피처 구성에서는 뉴스 피처가 추가적인 예측력으로 연결됐다고 보기 어려움.
-- aligned comparison의 요약 기준으로 보면 `20일 horizon`이 `10일 horizon`보다 덜 나쁘지만, 그래도 개선은 아님.
+QQQ auto preset은 여기에 `spy_ret_20`, `vix_speed`, `tlt_ret_20`, `uup_shock_5`, `target_spy_ratio_20`을 더하고, XLK/SOXX/IWM의 `ret_5`, `ret_20`, `shock_5`를 보충 피처로 붙인다.
 
-### 3. 현재 실험에서 볼 수 있는 결론
+XLE auto preset은 현재 코드 기준 `ret_1`, `ret_3`, `ret_5`, `ret_accel`, `price_to_ma_5`, `bb_pos_5`, `bb_width_5`, `vol_5`, `vol_10`, `drawdown`, `vol_ratio_5`, `rel_strength_5`, `spy_ret_5`, `vix_ret_5`, `vix_z_score_5`, `hyg_ret_5`, `uup_ret_5`, `target_spy_rel_ret_5`, `uso_ret_5`, `uso_shock_5`, `xop_ret_5`, `xop_shock_5`, `oih_ret_5`, `oih_shock_5`, `xlb_shock_5`를 사용한다.
 
-- 지금 시점의 기준 모델은 `market_only`로 보는 것이 안전함.
-- 뉴스 피처는 일부 중요 피처로 선택되긴 했지만, 공정 비교 기준 성능 개선까지는 이어지지 못함.
+XLF auto preset은 금융 섹터 문맥을 위해 금리/채권 민감도(`tlt_ret_5`, `tlt_ret_20`, `target_tlt_rel_ret_5`, `target_tlt_ratio_20`), 신용/리스크 문맥(`hyg_ret_5`, `hyg_z_score`, `vix_z_score_5`)과 KBE/KRE/KIE/IAI 보조 ETF의 `ret_5`, `shock_5` 피처를 함께 사용한다.
 
+### 뉴스 피처
 
-### 4. 날짜 범위 문제에 대한 설명
+스칼라 뉴스 피처 12개:
 
-- 시장 데이터 시작일은 기본적으로 `2015-01-01`로 설정되어 있음.
-- 뉴스 피처는 현재 저장된 파일 기준 `2019-03-21`부터 존재함.
-- 뉴스를 시장 프레임에 병합할 때는 날짜 기준 `left join` 이후 빈 뉴스 값을 `0.0`으로 채우는 구조라, 모델 입장에서는 아래 두 경우를 구분하지 못함.
-  - 진짜로 그날 뉴스가 0건인 경우
-  - 아직 그 시기 뉴스 데이터를 아예 수집하지 못한 경우
+| 피처 | 의미 |
+| --- | --- |
+| `news_count_5d` | 최근 5거래일 뉴스 수 합 |
+| `days_since_news` | 마지막 뉴스 이후 경과 거래일 수, 최대 30 |
+| `sentiment_gap` | 제목 긍정 확률 - 부정 확률 |
+| `body_sentiment_gap` | 본문 긍정 확률 - 부정 확률 |
+| `sentiment_shock` | 제목 감성 gap의 최근 5일 평균 대비 변화 |
+| `body_sentiment_5d_mean` | 본문 감성 5일 평균 |
+| `title_sentiment_5d_mean` | 제목 감성 5일 평균 |
+| `negative_news_spike_5d` | 본문 부정 확률의 최근 5일 평균 대비 비율 |
+| `body_sentiment_decay_3d` | 마지막 실제 뉴스 감성을 3일 반감기로 감쇠 |
+| `fomc_sentiment` | 본문 감성 x FOMC 여부 |
+| `fomc_recent_5d` | 최근 5일 FOMC 문서 존재 여부 |
+| `sentiment_divergence` | 제목 감성과 본문 감성의 절대 차이 |
 
-현재 생성된 `market_news` 학습 프레임 기준으로 보면:
+결측 처리 핵심:
 
-- 전체 학습 프레임 시작일: `2015-06-25`
-- `news_count_lag1`이 처음 0이 아닌 날짜: `2019-03-22`
-- 전체 행 수: `2626`
-- `news_count_lag1 = 0`인 행 수: `2139`
-- train 구간 행 수: `2100`
-- train 구간에서 실제로 뉴스가 있는 행 수: `214`
+- 일반 뉴스/감성 컬럼은 뉴스가 없는 날 0으로 채운다.
+- neutral 확률은 기본값 1.0으로 둔다.
+- `days_since_news`는 마지막 뉴스 이후 경과일을 별도 피처로 만든다.
+- `body_sentiment_decay_*d`와 `body_emb_*`는 마지막 실제 뉴스를 감쇠해 반영한다.
+- 임베딩은 무한정 forward-fill하지 않고 최대 5일까지만 감쇠한다.
 
-해석:
+### 임베딩 PCA
 
-- 즉 `market_news` 모델이라 해도 학습 초반의 긴 구간은 사실상 뉴스 없이 학습되고 있음.
-- 이런 상태에서는 `market_news`가 실제 뉴스 신호를 얼마나 잘 활용하는지보다, 오랫동안 `market_only`처럼 학습한 효과가 섞여 들어가게 됨.
-- 그래서 기본 비교 결과보다 aligned comparison 결과를 더 중요하게 봐야 함.
+`merged_finbert_with_embeddings.csv`의 `body_summary_embedding`은 먼저 `body_emb_0~29` 30차원으로 펼쳐진다. 이 raw 임베딩 30개를 그대로 학습 피처에 모두 넣지는 않고, train 구간에서만 `StandardScaler + PCA(5)`를 fit한 뒤 test 구간에는 transform만 적용한다. 이렇게 하는 이유는 test 정보가 PCA 좌표계에 섞이는 것을 막고, market-news 모델의 피처 수를 과하게 늘리지 않기 위해서다.
 
-소스별 현실적인 제약도 있음.
+학습 결과 metadata에는 `embedding_pca.source_columns`, `embedding_pca.feature_columns`, `explained_variance_ratio` 등이 저장된다. 따라서 나중에 모델이 어떤 임베딩 축을 사용했는지 재확인할 수 있다.
 
-- White House는 정권이 바뀌면 HTML 구조와 문서 분류 방식이 달라질 수 있음.
-- 과거 아카이브는 구조가 일정하지 않아 장기 백필이 어렵고, 기사 품질도 시기별로 들쭉날쭉할 수 있음.
-- 이런 상황에서 과거 구간을 무리하게 `0`으로 채워 넣으면 White House 관련 피처 의미가 희석될 수 있음.
+## 예측 수익률 Profile
 
-정리하면:
+`shared/cluster/model.py` 기준 label은 5개다.
 
-- `0`은 "그날 뉴스가 없었다"는 값으로는 쓸 수 있지만, "그 시기 뉴스 데이터가 아직 없다"는 결측 표현으로는 위험함.
-- 현재 실험 결과를 해석할 때는 반드시 이 점을 염두에 두어야 하고, 앞으로도 동일 horizon + 동일 기간의 aligned comparison을 기준 지표로 삼는 것이 좋음.
+| label | 5거래일 예측 수익률 |
+| --- | ---: |
+| `fall_strong` | -0.3% 미만 |
+| `fall` | -0.3% 이상, 0% 미만 |
+| `neutral` | 0% 이상, +0.3% 미만 |
+| `rise` | +0.3% 이상, +0.6% 미만 |
+| `rise_strong` | +0.6% 이상 |
 
-추후 진행할 것:
+profile 피처는 기본 시장/뉴스 피처 14개와 설명용 임베딩 PCA 10개, 총 24개다. 학습용 PCA는 5개, profile/대표뉴스용 PCA는 10개라 목적이 다르다.
 
-1. 뉴스 결측과 실제 0건을 더 명확히 분리
-2. 감성 평균 외에 이벤트성 피처를 더 정교하게 설계
-3. aligned comparison 결과를 기준 지표로 계속 발전시키는 게 나을듯 한데
+이 profile 리포트는 별도의 예측 모델을 새로 학습하는 것이 아니다. 이미 만들어진 `market_news` 회귀 모델의 test predictions를 읽고, 각 row의 `Pred_Future_Price / Current_Price - 1`로 예측 수익률을 계산한다. 그 수익률을 위 label로 나눈 뒤, 각 label에 속한 날짜들의 시장/뉴스 피처 평균과 대표 뉴스를 정리한다.
+
+`volatility_cluster_report.json`에서 특히 볼 만한 항목은 아래다.
+
+- `source_model_metrics`: profile을 만든 원본 `market_news` 모델의 평가 지표
+- `predicted_groups[].count`: 각 label에 속한 test row 수
+- `predicted_groups[].average_predicted_return_pct`: 해당 label의 평균 예측 수익률
+- `predicted_groups[].average_actual_return_pct`: 같은 row들의 실제 평균 수익률
+- `predicted_groups[].direction_accuracy`: label 방향과 실제 방향이 맞은 비율
+- `predicted_groups[].profile_feature_ranking`: 전체 평균 대비 가장 많이 다른 profile 피처
+- `predicted_groups[].representative_embedding_news`: label centroid와 임베딩상 가까운 실제 뉴스 문서
+
+대표 뉴스는 해당 test 날짜 근처의 뉴스만 고르는 방식이 아니라, centroid를 원본 임베딩 공간으로 복원한 뒤 전체 source news 중 cosine similarity가 높은 문서를 찾는 방식이다. 그래서 “이 label의 의미를 설명하는 비슷한 문서 예시”로 보는 것이 맞고, 특정 예측일의 직접 원인이라고 해석하면 안 된다.
+
+## 저장된 결과 스냅샷
+
+파일 수정 시각 기준 2026-05-24 산출물이다. `market_news` 결과는 나중에 `--market-news-only`로 다시 실행되어 market-only 비교 파일보다 더 최신이다.
+
+| 티커 | 실험 | preset | 피처 수 | 테스트 구간 | RMSE | 방향성 정확도 |
+| --- | --- | --- | ---: | --- | ---: | ---: |
+| QQQ | market-only | `qqq_growth_tech` | 34 | 2024-06-26 ~ 2026-04-24 | 14.5613 | 58.61% |
+| QQQ | market-news | `qqq_growth_tech` | 51 | 2024-06-13 ~ 2026-04-24 | 14.4487 | 57.82% |
+| XLE | market-only | `xle_energy` | 40 | 2024-06-26 ~ 2026-04-24 | 1.5820 | 46.19% |
+| XLE | market-news | `xle_energy` | 42 | 2024-06-13 ~ 2026-04-24 | 1.5403 | 49.04% |
+
+XLF는 `data/crawler/features/xlf/merged_finbert_with_embeddings.csv`와 `xlf_financials` 프리셋이 준비된 상태이며, 학습 산출물은 첫 실행 후 `data/training/xlf/` 아래에 생성된다.
+
+해석 주의:
+
+- QQQ market-news는 RMSE가 약간 좋아졌지만 방향성 정확도는 market-only보다 낮다.
+- XLE market-news는 저장된 최신 단독 결과 기준 RMSE와 방향성 정확도가 모두 좋아졌다.
+- XLE market-only 40피처 결과는 현재 코드의 25피처 `xle_energy` 프리셋보다 이전 산출물이다. 최신 코드와 완전히 맞는 baseline 비교가 필요하면 XLE를 `--market-news-only` 없이 다시 실행해야 한다.
+
+Aligned comparison 스냅샷:
+
+| 티커 | aligned 시작일 | best shared horizon | 방향성 delta | RMSE delta | 비고 |
+| --- | --- | ---: | ---: | ---: | --- |
+| QQQ | 2017-01-13 | 10 | +0.66%p | +0.1198 | 방향성은 개선, RMSE는 악화 |
+| XLE | 2017-01-13 | 5 | +3.70%p | -0.0268 | 이전 XLE 58피처 market-news 기준 |
+
+이 표에서 delta는 `market_news - market_only`다. 방향성 delta는 높을수록 좋고, RMSE delta는 낮을수록 좋다. 예를 들어 QQQ의 aligned best horizon 10은 방향성은 +0.66%p 개선됐지만 RMSE는 +0.1198로 악화됐다. 반대로 XLE의 aligned horizon 5는 방향성과 RMSE가 모두 개선된 결과다. 다만 XLE aligned 비교는 이후 생성된 42피처 market-news 결과보다 이전 산출물이므로 해석할 때 이 점을 같이 봐야 한다.
+
+예측 수익률 profile 스냅샷:
+
+| 티커 | label | count | 평균 예측 수익률 | 평균 실제 수익률 | 방향성 정확도 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QQQ | `fall_strong` | 20 | -0.472% | +0.271% | 45.0% |
+| QQQ | `fall` | 15 | -0.186% | +0.808% | 46.7% |
+| QQQ | `neutral` | 73 | +0.219% | +0.223% | 50.7% |
+| QQQ | `rise` | 299 | +0.416% | +0.378% | 60.5% |
+| QQQ | `rise_strong` | 60 | +0.867% | +0.649% | 60.0% |
+| XLE | `fall_strong` | 47 | -1.391% | +0.277% | 36.2% |
+| XLE | `fall` | 151 | -0.129% | +0.811% | 38.4% |
+| XLE | `neutral` | 173 | +0.116% | +0.236% | 56.6% |
+| XLE | `rise` | 51 | +0.404% | -0.432% | 52.9% |
+| XLE | `rise_strong` | 45 | +1.005% | +0.913% | 64.4% |
+
+## 산출물 위치
+
+```text
+data/
+├─ crawler/
+│  └─ features/
+│     ├─ qqq/
+│     │  ├─ merged_finbert_with_embeddings.csv
+│     │  └─ daily_news_features.csv
+│     ├─ xle/
+│     │  ├─ merged_finbert_with_embeddings.csv
+│     │  └─ daily_news_features.csv
+│     └─ xlf/
+│        ├─ merged_finbert_with_embeddings.csv
+│        └─ daily_news_features.csv
+└─ training/
+   ├─ qqq/
+   │  ├─ market_only/
+   │  ├─ market_news/
+   │  └─ comparison/
+   ├─ xle/
+   │  ├─ market_only/
+   │  ├─ market_news/
+   │  └─ comparison/
+   └─ xlf/
+      ├─ market_only/
+      ├─ market_news/
+      └─ comparison/
+```
+
+각 실험 폴더에는 보통 `training_frame.csv`, `predictions.csv`, `xgboost_model.json`, `metadata.json`이 생성된다. `comparison/`에는 `market_model_comparison*`, `volatility_cluster_*`, `cluster_visualization.png`가 저장된다.
+
+## 결과를 볼 때 기준
+
+성능을 볼 때는 단일 숫자 하나보다 아래 순서로 확인하는 편이 안전하다.
+
+1. 각 모델의 `metadata.json`
+   현재 실행의 피처 수, 테스트 구간, horizon, RMSE, 방향성 정확도를 확인한다.
+2. `market_model_comparison_aligned.json`
+   같은 시작일과 같은 horizon에서 market-only와 market-news를 비교했는지 확인한다.
+3. `predictions.csv`
+   특정 기간에서 예측이 한쪽 방향으로 치우쳤는지, 고확신 long/short 샘플 수가 너무 적지 않은지 확인한다.
+4. `volatility_cluster_report.json`
+   모델이 상승/하락 구간을 어떤 profile로 나누고 있는지 확인한다.
+
+특히 `high_conf_short_count`처럼 샘플 수가 매우 작은 지표는 정확도가 높거나 낮아도 그대로 일반화하면 위험하다. QQQ market-only의 short 고확신 정확도는 100%지만 샘플 수가 3개뿐이다.
+
+## 현재 주의점
+
+- `market_news_only` 실행은 `market_model_comparison.json`을 최신 market-news 중심 payload로 덮는다. market-only baseline까지 같은 시점으로 보려면 플래그 없이 다시 실행한다.
+- XLE의 저장된 market-only 결과는 현재 코드의 XLE 25피처 프리셋과 완전히 같은 기준이 아니다.
+- yfinance와 크롤러는 네트워크 의존성이 크므로 재실행 시 데이터 종료일과 외부 사이트 상태가 달라질 수 있다.
+- 결과 CSV는 `.gitignore` 정책상 일부만 추적된다. 티커별 feature CSV는 예외적으로 추적 가능하도록 열려 있다.
+
+아직 남아 있는 개선 후보도 있다.
+
+- XLE를 플래그 없이 다시 실행해 최신 25피처 프리셋 기준의 aligned comparison을 새로 만들기
+- `policy_monitor.py`의 테스트용 고정 날짜를 실제 운영용 날짜 계산으로 되돌리기
+- `requirements.txt`에 크롤러/후처리 확장 의존성을 별도 extra처럼 정리하기
+- profile 대표 뉴스를 전체 source news가 아니라 label/test 기간 근처 뉴스로 제한하는 옵션 추가하기
