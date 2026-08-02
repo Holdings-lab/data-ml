@@ -29,7 +29,7 @@ INPUT_CSV = feature_csv_path("xlf_merged_table_sorted_encoded.csv")
 OUTPUT_CSV = feature_csv_path("xlf_merged_finbert.csv")
 
 TITLE_COL = "title"
-BODY_COL = "body_summary"
+BODY_SUMMARY_COL = "body_summary"
 
 MODEL_NAME = "ProsusAI/finbert"
 
@@ -37,7 +37,7 @@ MODEL_NAME = "ProsusAI/finbert"
 # 청크 길이를 보수적으로 제한한다.
 MAX_CHARS_PER_CHUNK = 800
 
-# 배치 크기 기본값. 아래 `main()`에서 환경에 따라 권장값을 출력합니다.
+# 배치 크기 기본값.
 BATCH_SIZE = 8
 
 # 장치 설정: GPU 사용 불가하므로 CPU로 고정
@@ -64,6 +64,7 @@ def get_classifier():
         model=MODEL_NAME,
         tokenizer=MODEL_NAME,
         device=device_arg,
+        top_k=None,
     )
     return _CLASSIFIER
 
@@ -161,12 +162,30 @@ def weighted_average_scores(score_dicts: list[dict], weights: list[int]) -> dict
     }
 
 
-def extract_probs_from_output(output_one_text: list[dict]) -> dict:
+def extract_probs_from_output(output_one_text) -> dict:
     """
-    transformers pipeline의 return_all_scores 결과를
-    코드에서 다루기 쉬운 고정된 dict 형태로 바꾼다.
+    transformers pipeline의 결과를 고정된 dict 형태로 바꾼다.
     """
-    score_map = {item["label"].lower(): item["score"] for item in output_one_text}
+    score_map = {}
+
+    if not output_one_text:
+        return empty_scores()
+
+    # 1. 단일 dict로 들어온 경우 예외 처리 (예: {'label': 'positive', 'score': 0.95})
+    if isinstance(output_one_text, dict):
+        label = str(output_one_text.get("label", "")).lower()
+        score = float(output_one_text.get("score", 0.0))
+        if label:
+            score_map[label] = score
+
+    # 2. 정상적인 list[dict] 형태인 경우
+    elif isinstance(output_one_text, list):
+        for item in output_one_text:
+            if isinstance(item, dict):
+                label = str(item.get("label", "")).lower()
+                score = float(item.get("score", 0.0))
+                if label:
+                    score_map[label] = score
 
     pos = score_map.get("positive", 0.0)
     neg = score_map.get("negative", 0.0)
@@ -178,7 +197,6 @@ def extract_probs_from_output(output_one_text: list[dict]) -> dict:
         "neutral_prob": neu,
         "sentiment_score": pos - neg,
     }
-
 
 def classify_texts(text_list: list[str], batch_size: int = 8) -> list[dict]:
     """
@@ -318,13 +336,13 @@ def main():
     """
     df = pd.read_csv(INPUT_CSV)
 
-    required_cols = [TITLE_COL, BODY_COL]
+    required_cols = [TITLE_COL, BODY_SUMMARY_COL]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
 
     df[TITLE_COL] = df[TITLE_COL].fillna("").astype(str)
-    df[BODY_COL] = df[BODY_COL].fillna("").astype(str)
+    df[BODY_SUMMARY_COL] = df[BODY_SUMMARY_COL].fillna("").astype(str)
 
     print(f"[INFO] Total rows: {len(df)}")
     # GPU 사용 불가 환경이므로 CPU로 고정하고 배치 크기도 하드코딩한다.
@@ -341,7 +359,7 @@ def main():
     print("[INFO] Starting body sentiment analysis")
     body_results = pd.DataFrame(
         analyze_bodies(
-            df[BODY_COL].tolist(),
+            df[BODY_SUMMARY_COL].tolist(),
             max_chars=MAX_CHARS_PER_CHUNK,
             batch_size=BATCH_SIZE,
         )
