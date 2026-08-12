@@ -359,48 +359,65 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    ticker = args.ticker.upper()
-    crawler_input = Path(args.crawler_input) if args.crawler_input else _default_crawler_input(ticker)
-    bundle_path = Path(args.bundle) if args.bundle else _default_bundle_path(ticker)
-    news_output = (
-        Path(args.news_output)
-        if args.news_output
+def export_prediction_features(
+    *,
+    ticker: str = "QQQ",
+    crawler_input: Path | str | None = None,
+    bundle_path: Path | str | None = None,
+    market_input: Path | str | None = None,
+    news_output: Path | str | None = None,
+    market_output: Path | str | None = None,
+    daily_news_output: Path | str | None = None,
+    rows: int = DEFAULT_OUTPUT_ROWS,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    as_of_date: str | None = None,
+    include_all_sectors: bool = False,
+) -> dict[str, Any]:
+    """Create prediction-ready feature CSVs and return a compact summary."""
+
+    ticker = ticker.upper()
+    crawler_input_path = (
+        Path(crawler_input) if crawler_input else _default_crawler_input(ticker)
+    )
+    bundle = Path(bundle_path) if bundle_path else _default_bundle_path(ticker)
+    news_output_path = (
+        Path(news_output)
+        if news_output
         else _default_feature_output(ticker, "news_event_features.csv")
     )
-    market_output = (
-        Path(args.market_output)
-        if args.market_output
+    market_output_path = (
+        Path(market_output)
+        if market_output
         else _default_feature_output(ticker, "market_long_features.csv")
     )
-    daily_news_output = Path(args.daily_news_output) if args.daily_news_output else None
+    daily_news_output_path = Path(daily_news_output) if daily_news_output else None
 
-    if args.rows <= 0:
+    if rows <= 0:
         raise ValueError("--rows must be a positive integer.")
 
-    schema = _load_feature_schema(bundle_path)
+    schema = _load_feature_schema(bundle)
     news_required_columns, market_required_columns, min_rows = _required_columns_from_schema(schema)
 
-    raw_news = _read_csv(crawler_input, "crawler input")
+    raw_news = _read_csv(crawler_input_path, "crawler input")
     article_news = _normalize_article_news_frame(
         raw_news,
         ticker=ticker,
-        include_all_sectors=bool(args.include_all_sectors),
+        include_all_sectors=include_all_sectors,
     )
     daily_news = build_daily_news_feature_table(article_news)
-    if daily_news_output is not None:
-        _write_csv(daily_news, daily_news_output)
+    if daily_news_output_path is not None:
+        _write_csv(daily_news, daily_news_output_path)
 
-    end_date = args.end_date or (date.today() + timedelta(days=1)).isoformat()
-    overrides: dict[str, Any] = {"end_date": end_date}
-    if args.start_date:
-        overrides["start_date"] = args.start_date
-    config = make_training_config(ticker, news_input_path=crawler_input, **overrides)
+    resolved_end_date = end_date or (date.today() + timedelta(days=1)).isoformat()
+    overrides: dict[str, Any] = {"end_date": resolved_end_date}
+    if start_date:
+        overrides["start_date"] = start_date
+    config = make_training_config(ticker, news_input_path=crawler_input_path, **overrides)
 
-    market_input = Path(args.market_input) if args.market_input else None
+    market_input_path = Path(market_input) if market_input else None
     market_frame, market_source = _load_or_build_market_frame(
-        market_input=market_input,
+        market_input=market_input_path,
         config=config,
     )
     news_event_frame, _ = merge_news_features_into_market_frame(market_frame, daily_news)
@@ -409,39 +426,58 @@ def main() -> None:
         news_event_frame,
         feature_columns=news_required_columns,
         label="news-event",
-        rows=args.rows,
+        rows=rows,
         min_rows=min_rows,
-        as_of_date=args.as_of_date,
+        as_of_date=as_of_date,
     )
     market_export = _select_feature_rows(
         market_frame,
         feature_columns=market_required_columns,
         label="market-long",
-        rows=args.rows,
+        rows=rows,
         min_rows=min_rows,
-        as_of_date=args.as_of_date,
+        as_of_date=as_of_date,
     )
 
-    _write_csv(news_export, news_output)
-    _write_csv(market_export, market_output)
+    _write_csv(news_export, news_output_path)
+    _write_csv(market_export, market_output_path)
 
-    summary = {
+    return {
         "ticker": ticker,
-        "bundle": str(bundle_path),
-        "crawler_input": str(crawler_input),
+        "bundle": str(bundle),
+        "crawler_input": str(crawler_input_path),
         "market_source": market_source,
         "article_news_rows": int(len(article_news)),
         "daily_news_rows": int(len(daily_news)),
-        "news_output": str(news_output),
+        "daily_news_output": str(daily_news_output_path) if daily_news_output_path else None,
+        "news_output": str(news_output_path),
         "news_output_rows": int(len(news_export)),
         "news_output_start": str(news_export["Date"].iloc[0]),
         "news_output_end": str(news_export["Date"].iloc[-1]),
-        "market_output": str(market_output),
+        "market_output": str(market_output_path),
         "market_output_rows": int(len(market_export)),
         "market_output_start": str(market_export["Date"].iloc[0]),
         "market_output_end": str(market_export["Date"].iloc[-1]),
         "min_required_rows_for_lstm": int(min_rows),
     }
+
+
+def main() -> None:
+    args = parse_args()
+    summary = export_prediction_features(
+        ticker=args.ticker,
+        crawler_input=args.crawler_input,
+        bundle_path=args.bundle,
+        market_input=args.market_input,
+        news_output=args.news_output,
+        market_output=args.market_output,
+        daily_news_output=args.daily_news_output,
+        rows=args.rows,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        as_of_date=args.as_of_date,
+        include_all_sectors=bool(args.include_all_sectors),
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
