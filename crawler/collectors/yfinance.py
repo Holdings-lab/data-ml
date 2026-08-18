@@ -51,84 +51,113 @@ def convert_to_et_date(utc_time_str: str) -> str:
         print(f"[-] 날짜 타임존 변환 실패: {e}")
         return "N/A"
 
+
+
 def scrape_news_sync(ticker, target_date=TARGET_DATE):
-    # 1. API 엔드포인트 URL 설정
     api_url = "https://apidojo-yahoo-finance-v1.p.rapidapi.com/news/v2/list"
 
-    # 2. 헤더 설정 (본문 추출을 위한 헤더) 
     yahoo_headers = {
         "x-rapidapi-key": "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5",
         "x-rapidapi-host": "apidojo-yahoo-finance-v1.p.rapidapi.com",
         "Content-Type": "application/json"
     }
 
-    
     request_headers = {
         "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    # 2. 파라미터 및 바디 설정
-    # s: 뉴스 검색 키워드 (예: QQQ, XLF, XLE 등)
-    # snippetCount: 뉴스 개수 (최대 20)
-    querystring = {"s": ticker, "region": "US", "snippetCount": "20"}
-
-    # 3. API 요청 보내기 (빈 바디라도 post 형식이면 빈 딕셔너리를 json으로 던져주는 것이 좋습니다)
-    response = requests.post(api_url, headers=yahoo_headers, params=querystring, json={})
-
     save_results = []
+    next_uuids = None
+    stop_scraping = False
 
-    # 4. 응답 결과 정상 여부 확인 및 데이터 추출
-    if response.status_code == 200:
+
+    while not stop_scraping:
+        payload = {
+            "s": ticker,
+            "region": "US",
+            "snippetCount": 20
+        }
+        
+        # 이전 응답에서 받은 uuids 값이 있다면 payload에 추가
+        if next_uuids:
+            payload["uuids"] = next_uuids
+
+        response = requests.post(api_url, headers=yahoo_headers, json=payload)
+
+        if response.status_code != 200:
+            print(f"[!] API 요청 실패 (Status Code: {response.status_code})")
+            break
+
         response_json = response.json()
-        
         news_list = response_json.get('data', {}).get('main', {}).get('stream', [])
-        
+
+        if not news_list:
+            print(f"[*] 더 이상 불러올 뉴스가 없습니다. ({ticker})")
+            break
+
         for news in news_list:
             content = news.get('content', {})
             finance = content.get('finance', {})
-            
-            # premium 여부 (premium 이면 본문 추출이 불가하므로 PASS)
+
+            # Premium 뉴스 제외
             premium_info = finance.get('premiumFinance', {})
             is_premium = premium_info.get('isPremiumNews', True)
-
-            if(is_premium):
-                print(f"[!] 프리미엄 뉴스 패스: {content.get('title')[:28]}...")
+            if is_premium:
+                print(f"[!] 프리미엄 뉴스 패스: {content.get('title', '')[:28]}...")
                 continue
-                
+
+            # 날짜 검증
             release_date = content.get('pubDate')
             if release_date:
                 release_date = convert_to_et_date(release_date)
                 if release_date < target_date:
-                    print(f"[!] 과거 기사 발견 ({release_date}), {ticker} 수집 조기 종료.")
+                    print(f"[!] 과거 기사 발견 ({release_date} < {target_date}), {ticker} 수집 종료.")
+                    stop_scraping = True
                     break
 
+            # 본문 추출
             body_url = content.get('clickThroughUrl', {}).get('url') if content.get('clickThroughUrl') else None
-            response = requests.get(body_url, headers=request_headers, timeout=20)
-            response.raise_for_status()
+            if not body_url:
+                continue
+
+            try:
+                res = requests.get(body_url, headers=request_headers, timeout=20)
+                res.raise_for_status()
+
+                soup = BeautifulSoup(res.text, "html.parser")
+                body_tag = soup.find("div", class_="bodyItems-wrapper") or soup.find("div", class_="caas-body")
+                body_text = body_tag.get_text(" ", strip=True) if body_tag else ""
+
+                row = {
+                    "sector": ticker,
+                    "title": content.get('title'),
+                    "release_date": release_date,
+                    "url": body_url,
+                    "body": body_text
+                }
+                save_results.append(row)
+            except Exception as e:
+                print(f"[!] 본문 수집 실패 ({body_url}): {e}")
+                continue
+
+        # 응답 데이터에서 다음 페이지용 uuids 추출
+        extracted_uuids = response_json.get('data', {}).get('main', {}).get('pagination', {}).get('uuids')
+        print(f"[*] 다음 페이지 Cursor(uuids) 추출: {extracted_uuids}")
+        if not extracted_uuids or extracted_uuids == next_uuids:
+            print("[*] 다음 페이지 Cursor(uuids)가 없어 수집을 중단합니다.")
+            break
             
-            soup = BeautifulSoup(response.text, "html.parser")
-            body_tag = soup.find("div", class_="bodyItems-wrapper")
-            body_text = body_tag.get_text(" ", strip=True) if body_tag else ""                
-            
-            # 행(Row) 데이터 생성
-            row = {
-                "sector": ticker,
-                "title": content.get('title'),
-                "release_date": release_date,
-                "url": body_url,
-                "body": body_text
-            }
-            save_results.append(row)
-        return save_results
-    else:
-        print(f"API 요청 실패 (Error Code: {response.status_code})")
-        print(response.text)
+        next_uuids = extracted_uuids
+        time.sleep(0.5)
+
+    return save_results
+
 
 def main():
     news_results = scrape_news_sync(ticker="QQQ")

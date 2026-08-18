@@ -23,12 +23,12 @@ if PROJECT_ROOT_STR not in sys.path:
 from crawler.support_legacy.data_paths import collected_csv_path
 
 BASE_URL = "https://www.presidency.ucsb.edu"
-DEFAULT_OUTPUT_CSV = collected_csv_path("xlf_presidential_documents.csv")
-DEFAULT_KEYWORD_CONFIG_PATH = Path(__file__).with_name("keywords") / "xlf_keywords.json"
+DEFAULT_OUTPUT_CSV = collected_csv_path("qqq_presidential_documents2.csv")
+DEFAULT_KEYWORD_CONFIG_PATH = Path(__file__).with_name("keywords") / "qqq_keywords.json"
 
 # 날짜 기반 수집의 기본 시작점.
 # 별도 인자를 주지 않으면 이 날짜 이후 문서만 모은다.
-DEFAULT_START_DATE = "2017-01-01"
+DEFAULT_START_DATE = "2026-07-01"
 
 # UCSB 목록 페이지에서 한 번에 노출할 문서 수.
 # 페이지 수를 기준으로 자르지는 않지만, 페이지 요청 URL을 만들 때는 필요하다.

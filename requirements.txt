@@ -10,3 +10,4 @@ optuna
 selenium
 playwright
 sentence-transformers
+anthropic

@@ -34,7 +34,7 @@ SLEEP_BETWEEN_CALLS_SEC = 0.5                                     # Ollama API �
 
 # Ollama 설정은 코드에 고정한다.
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llama3"
+OLLAMA_MODEL = "llama3.2"
 
 # 청크 분할에 사용할 tokenizer와 token 기준 설정도 코드에 고정한다.
 TOKENIZER_NAME = "hf-internal-testing/llama-tokenizer"
