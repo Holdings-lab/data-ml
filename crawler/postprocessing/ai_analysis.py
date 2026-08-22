@@ -164,7 +164,7 @@ def _call_claude_summary(message: str, model: str) -> str:
 
 
 def main(ticker: str, target_date: datetime, days: int, csv_filename: str, prediction_json: str):
-    news_df = pd.read_csv(feature_csv_path(csv_filename))
+    news_df = pd.read_csv(csv_filename)
     news_df = _get_news(ticker, target_date, days, news_df)
     result_json = insert_news_to_payload(prediction_json, news_df)
     briefing = _call_claude_summary(FIXED_PROMPT + result_json, model=DEFAULT_MODEL)
