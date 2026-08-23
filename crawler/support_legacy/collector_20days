@@ -24,7 +24,7 @@ from crawler.collectors.bis import create_requests_session, crawl_bis_news_index
 from crawler.collectors.eia import get_steo_body, get_steo_items, get_today_body, get_today_items
 from crawler.collectors.fraser import DEFAULT_KEYWORDS as FRASER_DEFAULT_KEYWORDS, collect_fraser_documents
 from crawler.collectors.fed import crawl_implementation_note, crawl_fomc_statement, crawl_minutes
-from crawler.collectors.yfinance_temp import scrape_news_sync as scrape_yahoo_news
+from crawler.support_legacy.yfinance_temp import scrape_news_sync as scrape_yahoo_news
 from crawler.collectors.ucsb import (
     DOC_TYPE_URLS,
     crawl_listing,
@@ -40,7 +40,7 @@ FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars
 DEFAULT_OUTPUT_CSV = feature_csv_path("policy_updates_features_20days_revision.csv")
 DEFAULT_INTERVAL_SEC = 24 * 60 * 60 # 하루 1회 실행 주기 (초 단위)
 US_EASTERN_TZ = ZoneInfo("America/New_York")    # 미국 동부시간 기준
-KEYWORD_CONFIG_DIR = Path(__file__).with_name("keywords")   # American Presidential Project 관련 키워드 JSON 파일이 있는 디렉토리
+KEYWORD_CONFIG_DIR = Path("C:/Users/Lee/data-ml/crawler/collectors/keywords")  # American Presidential Project 관련 키워드 JSON 파일이 있는 디렉토리
 MONITOR_SECTORS = ("qqq", "xlf", "xle")
 
 SECTOR_MONITOR_CONFIGS: dict[str, dict[str, Any]] = {
@@ -592,7 +592,7 @@ def run_monitor(
     while True:
 
         # target_date = _get_target_date()
-        target_date = datetime.strptime("2026-07-20", "%Y-%m-%d").date()
+        target_date = datetime.strptime("2026-08-11", "%Y-%m-%d").date()
         cycle += 1
 
         print(f"[MONITOR] cycle={cycle} target_date={target_date.isoformat()} ")

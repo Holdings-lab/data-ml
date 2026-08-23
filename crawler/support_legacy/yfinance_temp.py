@@ -223,12 +223,17 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
                         print(f"    [{i}] 본문 추출 실패: {link[:60]}...")
                         continue
 
+                    # image_tag = soup_inner.find("img", class_="yf-lf8hkhu")
+                    # image = image_tag.get("src") if image_tag else "N/A"
+                    
                     clean_dataset.append({
                         "sector": ticker,
                         "title": title,
                         "url": link,
                         "release_date": date_str,
-                        "body": full_body
+                        # "image": image,
+                        "body": full_body,
+                        
                     })
 
                 except Exception as detail_err:

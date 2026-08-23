@@ -150,7 +150,7 @@ def crawl_minutes(url: str) -> dict:
     article = soup.find("div", id="article")
 
     # 제목은 본문 컨테이너 안의 h3에서 읽는다.
-    title_tag = article.find("h3") if article else ""
+    title_tag = article.find("h3") if article else None
     title = title_tag.get_text(" ", strip=True) if title_tag else ""
 
     contents = []
