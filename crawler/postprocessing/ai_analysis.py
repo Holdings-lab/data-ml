@@ -163,10 +163,17 @@ def _call_claude_summary(message: str, model: str) -> str:
     return str(text or "").strip()
 
 
-def main(ticker: str, target_date: datetime, days: int, csv_filename: str, prediction_json: str):
-    news_df = pd.read_csv(feature_csv_path(csv_filename))
+def main(
+    ticker: str,
+    target_date: datetime,
+    days: int,
+    csv_filename: str,
+    prediction_json: str,
+):
+    news_df = pd.read_csv(csv_filename)
     news_df = _get_news(ticker, target_date, days, news_df)
-    result_json = insert_news_to_payload(prediction_json, news_df)
+    prediction_json_text = Path(prediction_json).read_text(encoding="utf-8")
+    result_json = insert_news_to_payload(prediction_json_text, news_df)
     briefing = _call_claude_summary(FIXED_PROMPT + result_json, model=DEFAULT_MODEL)
     print(briefing)
 
@@ -195,14 +202,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--file",
         type=str,
-        default="policy_updates_features_20days_revision_sorted.csv",
+        default="policy_updates_features_20days.csv",
         help="CSV 파일명"
     )
     parser.add_argument(
         "--json",
         type=str,
-        default=TEST_JSON,
-        help="예측 결과 JSON 문자열 (기본값: None)"
+        required=True,
+        help="예측 결과 JSON 파일 경로"
     )
 
     args = parser.parse_args()

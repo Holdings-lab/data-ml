@@ -26,7 +26,7 @@ def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
 
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["sector", "title", "release_date", "url", "body"])
+        writer = csv.DictWriter(f, fieldnames=["sector", "title", "release_date", "url", "image", "body"])
         writer.writeheader()
         writer.writerows(records)
 
@@ -54,6 +54,7 @@ def convert_to_et_date(utc_time_str: str) -> str:
 
 
 def scrape_news_sync(ticker, target_date=TARGET_DATE):
+    print(f"\n[*] Yahoo Finance 뉴스 수집 시작: {ticker} ({target_date})")
     api_url = "https://apidojo-yahoo-finance-v1.p.rapidapi.com/news/v2/list"
 
     yahoo_headers = {
@@ -73,88 +74,81 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
     }
 
     save_results = []
-    next_uuids = None
-    stop_scraping = False
 
+    payload = {
+        "s": ticker,
+        "region": "US",
+        "snippetCount": 30
+    }
+    
+    response = requests.post(api_url, headers=yahoo_headers, json=payload)
 
-    while not stop_scraping:
-        payload = {
-            "s": ticker,
-            "region": "US",
-            "snippetCount": 20
-        }
+    if response.status_code != 200:
+        print(f"[!] API 요청 실패 (Status Code: {response.status_code})")
+        return []
+
+    response_json = response.json()
+    news_list = response_json.get('data', {}).get('main', {}).get('stream', [])
+
+    if not news_list:
+        print(f"[*] 더 이상 불러올 뉴스가 없습니다. ({ticker})")
+        return []
+
+    for news in news_list:
+        content = news.get('content', {})
+        finance = content.get('finance', {})
+
+        # Premium 뉴스 제외
+        premium_info = finance.get('premiumFinance', {})
+        is_premium = premium_info.get('isPremiumNews', True)
+        if is_premium:
+            print(f"[!] 프리미엄 뉴스 패스: {content.get('title', '')[:28]}...")
+            continue
+
+        print(f"[*] 뉴스 수집 중: {content.get('title', '')[:28]}...")
         
-        # 이전 응답에서 받은 uuids 값이 있다면 payload에 추가
-        if next_uuids:
-            payload["uuids"] = next_uuids
-
-        response = requests.post(api_url, headers=yahoo_headers, json=payload)
-
-        if response.status_code != 200:
-            print(f"[!] API 요청 실패 (Status Code: {response.status_code})")
-            break
-
-        response_json = response.json()
-        news_list = response_json.get('data', {}).get('main', {}).get('stream', [])
-
-        if not news_list:
-            print(f"[*] 더 이상 불러올 뉴스가 없습니다. ({ticker})")
-            break
-
-        for news in news_list:
-            content = news.get('content', {})
-            finance = content.get('finance', {})
-
-            # Premium 뉴스 제외
-            premium_info = finance.get('premiumFinance', {})
-            is_premium = premium_info.get('isPremiumNews', True)
-            if is_premium:
-                print(f"[!] 프리미엄 뉴스 패스: {content.get('title', '')[:28]}...")
+        # 날짜 검증
+        release_date = content.get('pubDate')
+        if release_date:
+            release_date = convert_to_et_date(release_date)
+            if release_date < target_date:
+                print(f"[!] 과거 기사 발견 ({release_date} < {target_date}), {ticker} 패스.")
                 continue
 
-            # 날짜 검증
-            release_date = content.get('pubDate')
-            if release_date:
-                release_date = convert_to_et_date(release_date)
-                if release_date < target_date:
-                    print(f"[!] 과거 기사 발견 ({release_date} < {target_date}), {ticker} 수집 종료.")
-                    stop_scraping = True
-                    break
-
-            # 본문 추출
-            body_url = content.get('clickThroughUrl', {}).get('url') if content.get('clickThroughUrl') else None
-            if not body_url:
+            if release_date > target_date:
+                print(f"[!] target_date 이후 기사 발견 ({release_date} > {target_date}), {ticker} 패스.")
                 continue
 
-            try:
-                res = requests.get(body_url, headers=request_headers, timeout=20)
-                res.raise_for_status()
+        # 본문 추출
+        body_url = content.get('clickThroughUrl', {}).get('url') if content.get('clickThroughUrl') else None
+        if not body_url:
+            continue
 
-                soup = BeautifulSoup(res.text, "html.parser")
-                body_tag = soup.find("div", class_="bodyItems-wrapper") or soup.find("div", class_="caas-body")
-                body_text = body_tag.get_text(" ", strip=True) if body_tag else ""
+        try:
+            res = requests.get(body_url, headers=request_headers, timeout=20)
+            res.raise_for_status()
 
-                row = {
-                    "sector": ticker,
-                    "title": content.get('title'),
-                    "release_date": release_date,
-                    "url": body_url,
-                    "body": body_text
-                }
-                save_results.append(row)
-            except Exception as e:
-                print(f"[!] 본문 수집 실패 ({body_url}): {e}")
-                continue
+            soup = BeautifulSoup(res.text, "html.parser")
+            body_tag = soup.find("div", class_="bodyItems-wrapper") or soup.find("div", class_="caas-body")
+            body_text = body_tag.get_text(" ", strip=True) if body_tag else ""
 
-        # 응답 데이터에서 다음 페이지용 uuids 추출
-        extracted_uuids = response_json.get('data', {}).get('main', {}).get('pagination', {}).get('uuids')
-        print(f"[*] 다음 페이지 Cursor(uuids) 추출: {extracted_uuids}")
-        if not extracted_uuids or extracted_uuids == next_uuids:
-            print("[*] 다음 페이지 Cursor(uuids)가 없어 수집을 중단합니다.")
-            break
-            
-        next_uuids = extracted_uuids
-        time.sleep(0.5)
+            og_image = soup.find("meta", property="og:image")
+            image = og_image.get("content") if og_image else ""
+
+            row = {
+                "sector": ticker,
+                "title": content.get('title'),
+                "release_date": release_date,
+                "url": body_url,
+                "image": image,
+                "body": body_text,
+            }
+            save_results.append(row)
+            time.sleep(0.5)
+
+        except Exception as e:
+            print(f"[!] 본문 수집 실패 ({body_url}): {e}")
+            continue
 
     return save_results
 
