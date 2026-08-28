@@ -25,6 +25,8 @@ from crawler.collectors.eia import get_steo_body, get_steo_items, get_today_body
 from crawler.collectors.fraser import DEFAULT_KEYWORDS as FRASER_DEFAULT_KEYWORDS, collect_fraser_documents
 from crawler.collectors.fed import crawl_implementation_note, crawl_fomc_statement, crawl_minutes
 from crawler.collectors.yfinance import scrape_news_sync as scrape_yahoo_news
+from crawler.collectors.yfinance_support import scrape_news_sync as scrape_yahoo_news_support
+
 from crawler.collectors.ucsb import (
     DOC_TYPE_URLS,
     crawl_listing,
@@ -67,6 +69,7 @@ CANONICAL_COLUMNS = [
     "release_date",
     "url",
     "title",
+    "image",
     "body"
 ]
 
@@ -261,7 +264,8 @@ def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
                         "release_date": _format_iso_date(article.get("release_date")),
                         "url": url,
                         "title": article.get("title", ""),
-                        "body": article.get("body", "")
+                        "image": "",
+                        "body": article.get("body", ""),    
                     }
                 )
 
@@ -295,6 +299,7 @@ def _collect_fraser_records(target_date: date) -> list[dict[str, Any]]:
                 "release_date": release_date,
                 "url": str(row.get("url", "")),
                 "title": str(row.get("title", "")),
+                "image": "",
                 "body": str(row.get("body", ""))
             }
         )
@@ -320,6 +325,7 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
                 "release_date": release_date,
                 "url": url,
                 "title": str(item.get("title", "")),
+                "image": "",
                 "body": get_steo_body(url)
             }
         )
@@ -338,7 +344,8 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
                 "release_date": release_date,
                 "url": url,
                 "title": str(item.get("title", "")),
-                "body": get_today_body(url)
+                "image": "",
+                "body": get_today_body(url),
             }
         )
 
@@ -389,7 +396,8 @@ def _collect_bis_records(target_date: date, max_pages: int, sleep_sec: float) ->
                 "release_date": article.get("published_date", ""),
                 "url": item["url"],
                 "title": article.get("title", ""),
-                "body": article.get("body", "")
+                "image": "",
+                "body": article.get("body", ""),
             }
         )
 
@@ -438,6 +446,7 @@ def _collect_ucsb_records(
                     "release_date": article.get("published_date", ""),
                     "url": item["url"],
                     "title": article.get("title", ""),
+                    "image": "",
                     "body": article.get("body", "")
                 }
             )
@@ -449,6 +458,9 @@ def _collect_ucsb_records(
 
 def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any]]:
     yahoo_records = scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
+
+    if not yahoo_records:
+        yahoo_records = scrape_yahoo_news_support(tickers=[ticker.upper()], target_date=target_date.isoformat())
 
     if not yahoo_records:
         return []
@@ -472,7 +484,8 @@ def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any
                 "release_date": release_date,
                 "url": str(row.get("url", "")),
                 "title": str(row.get("title", "")),
-                "body": str(row.get("body", row.get("full_text", "")))
+                "image": str(row.get("image", "")),
+                "body": str(row.get("body", row.get("full_text", ""))),
             }
         )
 

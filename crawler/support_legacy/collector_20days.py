@@ -24,7 +24,7 @@ from crawler.collectors.bis import create_requests_session, crawl_bis_news_index
 from crawler.collectors.eia import get_steo_body, get_steo_items, get_today_body, get_today_items
 from crawler.collectors.fraser import DEFAULT_KEYWORDS as FRASER_DEFAULT_KEYWORDS, collect_fraser_documents
 from crawler.collectors.fed import crawl_implementation_note, crawl_fomc_statement, crawl_minutes
-from crawler.support_legacy.yfinance_temp import scrape_news_sync as scrape_yahoo_news
+from crawler.collectors.yfinance_support import scrape_news_sync as scrape_yahoo_news_support
 from crawler.collectors.ucsb import (
     DOC_TYPE_URLS,
     crawl_listing,
@@ -450,7 +450,7 @@ def _collect_ucsb_records(
 
 
 def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any]]:
-    yahoo_records = scrape_yahoo_news(tickers=[ticker.upper()], target_date=target_date.isoformat())
+    yahoo_records = scrape_yahoo_news_support(tickers=[ticker.upper()], target_date=target_date.isoformat())
 
     if not yahoo_records:
         return []
