@@ -1,0 +1,5 @@
+{
+  "source": "C:\\Users\\admin\\data-ml\\data\\training\\xle\\event_direction_combo_h16_lstm_event_xgb_market_long_event_only_direction",
+  "alert_summary": [],
+  "note": "Historical OOS performance from the evaluation pipeline; production artifacts are trained separately for inference."
+}
