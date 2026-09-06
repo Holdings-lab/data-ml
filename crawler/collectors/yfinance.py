@@ -21,6 +21,7 @@ NY_TZ = ZoneInfo('America/New_York')
 # 기본 타겟 날짜: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
 TICKERS = ["QQQ", "XLF", "XLE"]
+API_KEY = "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5"
 
 def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
@@ -58,7 +59,7 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
     api_url = "https://apidojo-yahoo-finance-v1.p.rapidapi.com/news/v2/list"
 
     yahoo_headers = {
-        "x-rapidapi-key": "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5",
+        "x-rapidapi-key": API_KEY,
         "x-rapidapi-host": "apidojo-yahoo-finance-v1.p.rapidapi.com",
         "Content-Type": "application/json"
     }

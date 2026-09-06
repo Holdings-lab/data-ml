@@ -39,7 +39,7 @@ from crawler.support_legacy.data_paths import feature_csv_path
 BASE_URL = "https://www.federalreserve.gov"
 FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
-DEFAULT_OUTPUT_CSV = feature_csv_path("policy_updates_features.csv")
+DEFAULT_OUTPUT_CSV = "/opt/riseai/data/crawler/policy_updates_features.csv"
 DEFAULT_INTERVAL_SEC = 24 * 60 * 60 # 하루 1회 실행 주기 (초 단위)
 US_EASTERN_TZ = ZoneInfo("America/New_York")    # 미국 동부시간 기준
 KEYWORD_CONFIG_DIR = Path(__file__).with_name("keywords")   # American Presidential Project 관련 키워드 JSON 파일이 있는 디렉토리

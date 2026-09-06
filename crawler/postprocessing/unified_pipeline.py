@@ -143,7 +143,6 @@ def apply_text_summarization(df: pd.DataFrame, max_chars: int = MAX_SUMMARY_CHAR
                     summary = client.messages.create(
                         model="claude-haiku-4-5-20251001",
                         max_tokens=500,
-                        temperature=0.0,
                         system=system_prompt,
                         messages=[
                             {
