@@ -150,7 +150,6 @@ def _call_claude_summary(message: str, model: str) -> str:
     client = anthropic.Anthropic()
     response = client.messages.create(
         model=model,
-        temperature=0.5,
         max_tokens=500,
         messages=[{"role": "user", "content": message}],
     )
