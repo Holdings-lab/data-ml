@@ -192,6 +192,13 @@ def _count_matched_keywords(raw_value: object) -> int:
     return len(keywords)
 
 
+def _first_existing_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
+    for column in candidates:
+        if column in frame.columns:
+            return column
+    return None
+
+
 def load_news_source_table(input_path) -> pd.DataFrame:
     """
     crawler 후처리 결과인 merged_finbert_with_embeddings.csv를 읽어 표준 형태로 정리한다.
@@ -200,24 +207,42 @@ def load_news_source_table(input_path) -> pd.DataFrame:
     동일한 규칙으로 일자별 피처를 만들 수 있다.
     """
     news_df = pd.read_csv(input_path, encoding="utf-8-sig")
+    news_df.columns = [str(column).strip() for column in news_df.columns]
 
-    required_columns = [
-        "date",
-        "category",
-        "doc_type",
-        "title",
-        "body",
-    ]
+    required_columns = ["category", "doc_type", "title"]
     _validate_required_columns(news_df, required_columns, str(input_path))
 
+    date_column = _first_existing_column(
+        news_df,
+        ("date", "Date", "release_date", "published_at"),
+    )
+    body_column = _first_existing_column(
+        news_df,
+        ("body", "body_summary", "body_text", "summary"),
+    )
+    missing_alias_groups = []
+    if date_column is None:
+        missing_alias_groups.append("one of: date, Date, release_date, published_at")
+    if body_column is None:
+        missing_alias_groups.append("one of: body, body_summary, body_text, summary")
+    if missing_alias_groups:
+        raise ValueError(
+            f"{input_path} is missing required news columns: "
+            f"{'; '.join(missing_alias_groups)}"
+        )
+
     prepared = news_df.copy()
-    prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
+    prepared["date"] = pd.to_datetime(prepared[date_column], errors="coerce")
     prepared = prepared.dropna(subset=["date"]).copy()
 
     prepared["category"] = prepared["category"].map(_normalize_category)
     prepared["doc_type"] = prepared["doc_type"].fillna("unknown").astype(str)
     prepared["title"] = prepared["title"].fillna("").astype(str)
-    prepared["body"] = prepared["body"].fillna("").astype(str)
+    prepared["body"] = prepared[body_column].fillna("").astype(str)
+
+    link_column = _first_existing_column(prepared, ("link", "url"))
+    if link_column is not None and "link" not in prepared.columns:
+        prepared["link"] = prepared[link_column].fillna("").astype(str)
 
     if "body_original_length" not in prepared.columns:
         prepared["body_original_length"] = prepared["body"].str.len()

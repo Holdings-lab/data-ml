@@ -116,6 +116,46 @@ XLF_MARKET_FEATURE_COLUMNS: tuple[str, ...] = (
     "iai_shock_5",
 )
 
+XLV_MARKET_FEATURE_COLUMNS: tuple[str, ...] = (
+    "ret_1",
+    "ret_3",
+    "ret_5",
+    "ret_10",
+    "ret_accel",
+    "price_to_ma_5",
+    "price_to_ma_20",
+    "slope_5",
+    "bb_pos_5",
+    "bb_width_5",
+    "macd_hist",
+    "rsi_14",
+    "vol_5",
+    "vol_10",
+    "vol_shock",
+    "drawdown",
+    "vol_ratio_5",
+    "rel_strength_5",
+    "spy_ret_5",
+    "vix_ret_5",
+    "vix_z_score_5",
+    "hyg_ret_5",
+    "hyg_z_score",
+    "uup_ret_5",
+    "tlt_ret_5",
+    "tlt_ret_20",
+    "target_spy_rel_ret_5",
+    "target_tlt_rel_ret_5",
+    "target_tlt_ratio_20",
+    "ibb_ret_5",
+    "ibb_shock_5",
+    "xbi_ret_5",
+    "xbi_shock_5",
+    "ihi_ret_5",
+    "ihi_shock_5",
+    "ihf_ret_5",
+    "ihf_shock_5",
+)
+
 
 @dataclass(frozen=True)
 class TickerTrainingPreset:
@@ -209,12 +249,25 @@ NAMED_TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
         optuna_trials=30,
         random_seed=91,
     ),
+    "xlv_healthcare": TickerTrainingPreset(
+        name="xlv_healthcare",
+        macro_tickers=FIXED_MACRO_TICKERS + ("IBB", "XBI", "IHI", "IHF"),
+        supplementary_ticker_feature_suffixes=(),
+        market_feature_columns=XLV_MARKET_FEATURE_COLUMNS,
+        horizon_candidates=(3, 5, 10, 20),
+        regression_style_fixed_horizon=2,
+        training_embedding_pca_components=5,
+        top_feature_count=40,
+        optuna_trials=30,
+        random_seed=109,
+    ),
 }
 
 TICKER_AUTO_PRESET_NAMES: dict[str, str] = {
     "QQQ": "qqq_growth_tech",
     "XLE": "xle_energy",
     "XLF": "xlf_financials",
+    "XLV": "xlv_healthcare",
 }
 
 TICKER_TRAINING_PRESETS: dict[str, TickerTrainingPreset] = {
