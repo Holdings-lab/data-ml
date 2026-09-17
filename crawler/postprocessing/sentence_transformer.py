@@ -25,9 +25,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from crawler.support_legacy.data_paths import feature_csv_path
 
 
-INPUT_CSV = feature_csv_path("xlf_merged_finbert.csv")
-OUTPUT_CSV = feature_csv_path("xlf_merged_finbert_with_embeddings.csv")
-OUTPUT_PCA = feature_csv_path("xlf_merged_finbert_pca.pkl")
+INPUT_CSV = feature_csv_path("xlv_merged_finbert.csv")
+OUTPUT_CSV = feature_csv_path("xlv_merged_finbert_with_embeddings.csv")
+OUTPUT_PCA = feature_csv_path("xlv_merged_finbert_pca.pkl")
 
 SUMMARY_COL = "body_summary"
 EMBEDDING_COL = "body_summary_embedding"

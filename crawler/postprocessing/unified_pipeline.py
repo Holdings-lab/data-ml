@@ -33,7 +33,7 @@ MAX_SUMMARY_CHARS = 2000
 SLEEP_BETWEEN_SUMMARIZE_SEC = 0.5
 
 PCA_DIM = 30
-EXPECTED_CATEGORY_VALUES = ["BIS", "EIA", "FOMC", "FRASER", "UCSB", "YAHOO"]
+EXPECTED_CATEGORY_VALUES = ["BIS", "EIA", "FOMC", "FRASER", "FDA", "UCSB", "YAHOO"]
 
 def _sector_pca_model_path(sector: str | None) -> str:
     """섹터별 PCA 모델 경로를 반환한다."""
