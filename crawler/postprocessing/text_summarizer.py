@@ -23,8 +23,8 @@ if PROJECT_ROOT_STR not in sys.path:
 
 from crawler.support_legacy.data_paths import collected_csv_path, summarized_csv_path
 
-INPUT_CSV = collected_csv_path("yahoo_market_news_2026-07-24.csv")                         # 입력 CSV 경로
-OUTPUT_CSV = summarized_csv_path("yahoo_market_news_2026-07-24_summarized.csv")            # 출력 CSV 경로
+INPUT_CSV = collected_csv_path("xlv_presidential_documents.csv")                         # 입력 CSV 경로
+OUTPUT_CSV = summarized_csv_path("xlv_presidential_documents_summarized.csv")            # 출력 CSV 경로
 
 BODY_COL = "body"
 SUMMARY_COL = "body_summary"

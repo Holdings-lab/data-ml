@@ -15,8 +15,10 @@ if PROJECT_ROOT_STR not in sys.path:
 
 from crawler.support_legacy.data_paths import feature_csv_path, summarized_csv_path
 
-DEFAULT_MERGED_OUTPUT_CSV = feature_csv_path("xlf_merged_table_sorted.csv")
-DEFAULT_ENCODED_OUTPUT_CSV = feature_csv_path("xlf_merged_table_sorted_encoded.csv")
+DEFAULT_MERGED_OUTPUT_CSV = feature_csv_path("xlv_merged_table_sorted.csv")
+DEFAULT_ENCODED_OUTPUT_CSV = feature_csv_path("xlv_merged_table_sorted_encoded.csv")
+
+EXPECTED_CATEGORY_VALUES = ["FOMC", "FDA", "UCSB"]
 
 # 존재하는 파일 경로만 반환
 def _existing_csv_paths(csv_paths: Iterable[str]) -> list[str]:
@@ -79,7 +81,7 @@ def merge_csvs_to_table(
         release_date = _pick_first_existing(df, ["release_date", "published_date"])
         url = _pick_first_existing(df, ["link", "url"])
         title = "title" if "title" in df.columns else None
-        body = _pick_first_existing(df, ["body"])
+        body_summary = _pick_first_existing(df, ["body_summary", "body"])
 
         missing = [
             name
@@ -89,7 +91,7 @@ def merge_csvs_to_table(
                 ("release_date", release_date),
                 ("url", url),
                 ("title", title),
-                ("body", body),
+                ("body_summary", body_summary),
             ]
             if col is None
         ]
@@ -100,7 +102,7 @@ def merge_csvs_to_table(
                 f"사용 가능한 컬럼: {list(df.columns)}"
             )
 
-        body_series = df[body].fillna("").astype(str)
+        body_series = df[body_summary].fillna("").astype(str)
         body_length_series = body_series.str.len()
 
         output = pd.DataFrame(
@@ -111,7 +113,7 @@ def merge_csvs_to_table(
                 "url": df[url],
                 "body_original_length": body_length_series,
                 "title": df[title],
-                "body": body_series,
+                "body_summary": body_series,
             }
         )
         tables.append(output)
@@ -120,7 +122,7 @@ def merge_csvs_to_table(
     if drop_duplicates:
         merged = merged.drop_duplicates()
 
-    merged = merged[["category", "doc_type", "release_date", "url", "body_original_length", "title", "body"]]
+    merged = merged[["category", "doc_type", "release_date", "url", "body_original_length", "title", "body_summary"]]
 
     if sort_by_date:
         merged["release_date"] = pd.to_datetime(merged["release_date"], errors="coerce")
@@ -162,8 +164,11 @@ def one_hot_encode_category(
 def main() -> None:
     csv_candidates = [
         summarized_csv_path("fed_fomc_links_summarized.csv"),
-        summarized_csv_path("xlf_presidential_documents_summarized.csv"),
-        summarized_csv_path("fraser_sample_summarized.csv"),
+        summarized_csv_path("xlv_presidential_documents_summarized.csv"),
+        summarized_csv_path("fda_2018-01-01_summarized.csv"),
+        summarized_csv_path("fda_2020-01-01_summarized.csv"),
+        summarized_csv_path("fda_2023-01-01_summarized.csv"),
+        summarized_csv_path("fda_2024-01-01_summarized.csv"),
     ]
     csv_paths = _existing_csv_paths(csv_candidates)
 
@@ -178,7 +183,7 @@ def main() -> None:
     merged.to_csv(DEFAULT_MERGED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[INFO] saved merged file: {DEFAULT_MERGED_OUTPUT_CSV}")
 
-    encoded = one_hot_encode_category(merged)
+    encoded = one_hot_encode_category(merged, expected_categories=EXPECTED_CATEGORY_VALUES)
     encoded.to_csv(DEFAULT_ENCODED_OUTPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[INFO] saved encoded file: {DEFAULT_ENCODED_OUTPUT_CSV}")
 

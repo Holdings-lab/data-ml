@@ -25,8 +25,8 @@ except ImportError as exc:
 # =========================
 # Config
 # =========================
-INPUT_CSV = feature_csv_path("xlf_merged_table_sorted_encoded.csv")
-OUTPUT_CSV = feature_csv_path("xlf_merged_finbert.csv")
+INPUT_CSV = feature_csv_path("xlv_merged_table_sorted_encoded.csv")
+OUTPUT_CSV = feature_csv_path("xlv_merged_finbert.csv")
 
 TITLE_COL = "title"
 BODY_SUMMARY_COL = "body_summary"

@@ -72,7 +72,7 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
     clean_dataset = []
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800}
@@ -145,8 +145,10 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
                     date_str = "N/A"
                     time_tag = soup_inner.find("time", class_="byline-attr-meta-time") or soup_inner.find("time")
                     if time_tag:
-                        raw_date = time_tag.get_text(strip=True)
-                        date_str = convert_to_iso_date(raw_date)
+                        raw_date = time_tag.get("datetime")
+                        date_str = raw_date.split("T")[0] if raw_date else "N/A"
+                    else:
+                        date_str = "N/A"
 
                     if date_str == "N/A":
                         print(f"    [{i}] 날짜 추출 실패: {link}")
@@ -197,8 +199,7 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
                 time.sleep(0.5)
         
         browser.close()
-
-    print(clean_dataset)
+        
     return clean_dataset
 
 

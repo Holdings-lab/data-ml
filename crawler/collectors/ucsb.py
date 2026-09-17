@@ -23,12 +23,12 @@ if PROJECT_ROOT_STR not in sys.path:
 from crawler.support_legacy.data_paths import collected_csv_path
 
 BASE_URL = "https://www.presidency.ucsb.edu"
-DEFAULT_OUTPUT_CSV = collected_csv_path("qqq_presidential_documents2.csv")
-DEFAULT_KEYWORD_CONFIG_PATH = Path(__file__).with_name("keywords") / "qqq_keywords.json"
+DEFAULT_OUTPUT_CSV = collected_csv_path("xlv_presidential_documents.csv")
+DEFAULT_KEYWORD_CONFIG_PATH = Path(__file__).with_name("keywords") / "xlv_keywords.json"
 
 # 날짜 기반 수집의 기본 시작점.
 # 별도 인자를 주지 않으면 이 날짜 이후 문서만 모은다.
-DEFAULT_START_DATE = "2026-07-01"
+DEFAULT_START_DATE = "2018-01-01"
 
 # UCSB 목록 페이지에서 한 번에 노출할 문서 수.
 # 페이지 수를 기준으로 자르지는 않지만, 페이지 요청 URL을 만들 때는 필요하다.
@@ -43,17 +43,11 @@ HEADERS = {
 }
 
 # UCSB에서 현재 수집 대상으로 삼는 문서 카테고리의 목록 페이지 URL.
-# 각 카테고리는 최신 문서가 먼저 보인다는 전제를 두고,
+# 각 문서 타입은 최신 문서가 먼저 보인다는 전제를 두고,
 # 시작 날짜보다 오래된 문서가 나오면 이후 페이지 탐색을 멈춘다.
 DOC_TYPE_URLS = {
-    "Executive Orders": (
-        f"{BASE_URL}/documents/app-categories/"
-        "written-presidential-orders/presidential/executive-orders"
-    ),
-    "Proclamations": (
-        f"{BASE_URL}/documents/app-categories/"
-        "written-presidential-orders/presidential/proclamations"
-    ),
+    "Executive Orders":f"{BASE_URL}/documents/app-categories/written-presidential-orders/presidential/executive-orders",
+    "Proclamations": f"{BASE_URL}/documents/app-categories/written-presidential-orders/presidential/proclamations",
     "Memoranda": f"{BASE_URL}/documents/app-categories/presidential/memoranda",
     "Statements": f"{BASE_URL}/documents/app-categories/statements",
     "News Conferences": f"{BASE_URL}/documents/app-categories/presidential/news-conferences",
@@ -76,32 +70,20 @@ DATE_PATTERN = re.compile(r"^[A-Z][a-z]+ \d{1,2}, \d{4}$")
 def clean_text(text: str) -> str:
     """
     연속 공백과 줄바꿈을 하나의 공백으로 정리한 뒤 양끝 공백을 제거한다.
-
-    UCSB 페이지는 줄바꿈, 탭, 중복 공백이 섞여 있는 경우가 많아서
-    대부분의 텍스트 비교와 저장 전에 이 정규화를 거친다.
     """
     return re.sub(r"\s+", " ", text).strip()
 
 
 def parse_published_date(raw_value: str) -> str:
     """
-    UCSB 목록 페이지의 날짜 문자열을 YYYY-MM-DD 형식으로 변환한다.
-
-    입력 예:
-    - "April 5, 2026"
-    출력 예:
-    - "2026-04-05"
+    Month dd, yyyy -> YYYY-MM-dd
     """
-    parsed = datetime.strptime(raw_value, "%B %d, %Y")
-    return parsed.strftime("%Y-%m-%d")
+    return datetime.strptime(raw_value, "%B %d, %Y").strftime("%Y-%m-%d")
 
 
 def parse_start_date(raw_value: str) -> datetime.date:
     """
-    CLI로 받은 시작 날짜 문자열을 date 객체로 변환한다.
-
-    이 date 객체는 목록 페이지 순회 중
-    "이 문서가 수집 대상 기간 안에 있는가?"를 판단하는 기준점으로 사용된다.
+    iso 형식의 문자열을 date 객체로 변환한다
     """
     return datetime.strptime(raw_value, "%Y-%m-%d").date()
 
@@ -116,7 +98,7 @@ def normalize_keyword_dictionary(
     - 그룹명과 키워드 문자열의 공백을 정리한다.
     - 빈 문자열은 제거한다.
     - 중복 키워드는 제거한다.
-    - 각 그룹의 가중치를 읽는다. 지정되지 않으면 1.0을 사용한다.
+    - 각 그룹의 가중치를 읽는다. 지정되지 않으면 0.0을 사용한다.
     - 대소문자 구분 없는 정렬로 결과를 고정한다.
     - 최종적으로 유효한 그룹이 하나도 없으면 예외를 발생시킨다.
     """
@@ -124,21 +106,21 @@ def normalize_keyword_dictionary(
 
     for group_name, raw_group in keyword_dictionary.items():
         group = clean_text(str(group_name))
-        raw_keywords: Sequence[str] | Any = raw_group
-        weight = 1.0
+        raw_keywords = raw_group
+        weight = 0.0
 
         if isinstance(raw_group, Mapping):
             raw_keywords = raw_group.get("keywords", [])
-            raw_weight = raw_group.get("weight", 1.0)
+            raw_weight = raw_group.get("weight", 0.0)
             try:
                 weight = float(raw_weight)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Invalid weight for keyword group '{group_name}': {raw_weight!r}") from exc
 
-        if isinstance(raw_keywords, (str, bytes)) or not isinstance(raw_keywords, Sequence):
+        if not isinstance(raw_keywords, Sequence):
             raise ValueError(f"Keyword group '{group_name}' must contain a keyword list.")
 
-        keywords = [clean_text(str(keyword)) for keyword in raw_keywords if clean_text(str(keyword))]
+        keywords = [keyword for keyword in raw_keywords]
         if group and keywords:
             normalized[group] = {
                 "weight": weight,
@@ -368,7 +350,7 @@ def match_keywords(
 
     for group_name, group_config in keyword_dictionary.items():
         keywords = group_config.get("keywords", []) if isinstance(group_config, Mapping) else group_config
-        if isinstance(keywords, (str, bytes)) or not isinstance(keywords, Sequence):
+        if not isinstance(keywords, Sequence):
             continue
 
         group_matches = [keyword for keyword in keywords if keyword.lower() in lowered_text]
@@ -511,8 +493,6 @@ def crawl_ucsb_documents(
                 "doc_type",
                 "title",
                 "url",
-                "matched_keyword_groups",
-                "matched_keywords",
                 "body",
             ]
         ].sort_values(by=["published_date", "doc_type"], ascending=[False, True])

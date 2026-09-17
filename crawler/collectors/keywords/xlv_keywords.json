@@ -1,0 +1,79 @@
+{
+  "xlv_proxy": {
+    "weight": 0.3,
+    "keywords": [
+      "XLV",
+      "Health Care Select Sector",
+      "healthcare sector",
+      "health care sector",
+      "medical sector",
+      "large-cap healthcare",
+      "pharma sector"
+    ]
+  },
+  "industries": {
+    "weight": 0.6,
+    "keywords": [
+      "pharmaceuticals",
+      "biotechnology",
+      "medical devices",
+      "health insurance",
+      "health care providers",
+      "life sciences",
+      "medical equipment",
+      "managed care",
+      "clinical trials",
+      "therapeutics",
+      "healthcare services"
+    ]
+  },
+  "policy_regulation": {
+    "weight": 1.0,
+    "keywords": [
+      "FDA",
+      "Food and Drug Administration",
+      "Medicare",
+      "Medicaid",
+      "drug pricing",
+      "patent expiration",
+      "patent cliff",
+      "healthcare reform",
+      "Affordable Care Act",
+      "regulatory approval",
+      "reimbursement",
+      "Inflation Reduction Act",
+      "clinical approval",
+      "pricing regulations"
+    ]
+  },
+  "policy_actions": {
+    "weight": 0.7,
+    "keywords": [
+      "approve",
+      "approval",
+      "reject",
+      "rejection",
+      "regulate",
+      "negotiate",
+      "cap",
+      "subsidize",
+      "reform",
+      "mandate",
+      "expand",
+      "repeal",
+      "restrict",
+      "ease"
+    ]
+  },
+  "macro": {
+    "weight": 0.2,
+    "keywords": [
+      "healthcare spending",
+      "aging population",
+      "demographic shift",
+      "public health",
+      "inflation",
+      "interest rates"
+    ]
+  }
+}
