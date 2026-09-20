@@ -109,6 +109,33 @@ def _initialize_market_frame(raw: pd.DataFrame, target_ticker: str) -> pd.DataFr
     return df.reset_index().rename(columns={"index": "Date"})
 
 
+
+
+def _prepare_market_feature_base(df: pd.DataFrame) -> pd.DataFrame:
+    # Normalize raw yfinance rows before rolling feature calculation.
+    # yfinance can return a union calendar across tickers. If a row exists
+    # for a reference ticker but not for the target ETF, target rolling
+    # indicators become NaN for several following trading days.
+    prepared = df.copy()
+    prepared["Date"] = pd.to_datetime(prepared["Date"], errors="coerce").dt.tz_localize(None)
+    prepared = prepared.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+
+    target_columns = [
+        "target_price",
+        "target_open",
+        "target_high",
+        "target_low",
+        "target_volume",
+    ]
+    prepared[target_columns] = prepared[target_columns].apply(pd.to_numeric, errors="coerce")
+    prepared = prepared.dropna(subset=target_columns).copy()
+
+    reference_columns = ["SPY_price", "VIX_price", "TLT_price", "HYG_price", "UUP_price"]
+    for column in reference_columns:
+        prepared[column] = pd.to_numeric(prepared[column], errors="coerce").ffill()
+
+    return prepared.reset_index(drop=True)
+
 def _add_return_and_volatility_features(df: pd.DataFrame) -> list[str]:
     """
     가장 기본적인 가격 변화율과 변동성 피처를 추가한다.
@@ -365,12 +392,17 @@ def _add_supplementary_ticker_features(
     supplementary_tickers: tuple[str, ...],
 ) -> list[str]:
     """
-    고정 매크로 5개 외 추가 티커(예: USO, XOP)의 기본 피처를 자동 생성한다.
+    고정 매크로 5개 외 추가 티커를 cleaned target calendar에 맞춰 자동 생성한다.
 
-    생성 피처: {t}_ret_5, {t}_ret_20, {t}_shock_5 (단기/중기 수익률 + 충격)
-    티커가 raw에 없으면 조용히 건너뛴다.
+    생성 피처: {t}_ret_5, {t}_ret_20, {t}_shock_5.
+    raw가 여러 티커의 union calendar를 포함할 수 있으므로 target 거래일에 재정렬한 뒤
+    과거값만 forward-fill해서 휴장성 결측 행이 rolling feature를 깨지 않도록 한다.
     """
     price_field = "Adj Close" if "Adj Close" in raw.columns.get_level_values(0) else "Close"
+    base_dates = pd.DatetimeIndex(pd.to_datetime(df["Date"], errors="coerce"))
+    if base_dates.tz is not None:
+        base_dates = base_dates.tz_convert(None)
+
     added: list[str] = []
     seen: set[str] = set()
 
@@ -386,21 +418,29 @@ def _add_supplementary_ticker_features(
         except KeyError:
             continue
 
+        series = pd.to_numeric(series, errors="coerce")
+        series_index = pd.DatetimeIndex(pd.to_datetime(series.index, errors="coerce"))
+        if series_index.tz is not None:
+            series_index = series_index.tz_convert(None)
+        series.index = series_index
+        series = series.sort_index().reindex(base_dates).ffill()
+
         col_price = f"{t}_price"
-        df[col_price] = series.values
+        df[col_price] = series.to_numpy()
 
         ret5_col = f"{t}_ret_5"
         ret20_col = f"{t}_ret_20"
         shock_col = f"{t}_shock_5"
 
-        df[ret5_col] = series.pct_change(5).values
-        df[ret20_col] = series.pct_change(20).values
-        df[shock_col] = df[ret5_col] / (series.pct_change(20).rolling(20).std().values + 1e-9)
+        ret5 = series.pct_change(5)
+        ret20 = series.pct_change(20)
+        df[ret5_col] = ret5.to_numpy()
+        df[ret20_col] = ret20.to_numpy()
+        df[shock_col] = (ret5 / (ret20.rolling(20).std() + 1e-9)).to_numpy()
 
         added.extend([ret5_col, ret20_col, shock_col])
 
     return added
-
 
 def build_market_feature_frame(
     raw: pd.DataFrame,
@@ -413,7 +453,7 @@ def build_market_feature_frame(
     이 함수는 내부적으로 여러 세부 블록을 호출하지만, 외부에서는
     "시장 피처 테이블 하나를 만든다"라는 단일 책임으로 보이게 설계했다.
     """
-    df = _initialize_market_frame(raw, target_ticker)
+    df = _prepare_market_feature_base(_initialize_market_frame(raw, target_ticker))
 
     feature_builders: list[FeatureBuilder] = [
         _add_return_and_volatility_features,
