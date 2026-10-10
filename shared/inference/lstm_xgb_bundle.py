@@ -164,6 +164,36 @@ def _tier_result(
     }
 
 
+def _downside_gate_result(
+    thresholds: dict[str, Any],
+    news_probability: float,
+    direction_score: float,
+    regime: str,
+) -> dict[str, Any]:
+    config = thresholds.get("downside_gate", {})
+    enabled = bool(config.get("enabled", False))
+    raw_regimes = config.get("event_regimes", [])
+    regimes = [raw_regimes] if isinstance(raw_regimes, str) else list(raw_regimes)
+    news_min = float(config.get("news_event_probability_min", 1.0))
+    direction_max = float(config.get("direction_probability_up_max", 0.0))
+    alert = bool(
+        enabled
+        and regime in regimes
+        and news_probability >= news_min
+        and direction_score <= direction_max
+    )
+    return {
+        "tier": str(config.get("tier", "Downside")),
+        "enabled": enabled,
+        "alert": alert,
+        "event_regimes": regimes,
+        "news_event_probability_min": news_min,
+        "direction_probability_up_max": direction_max,
+        "direction": "DOWN",
+        "direction_probability_up": float(direction_score),
+    }
+
+
 def predict_from_feature_frames(
     bundle: LoadedBundle,
     news_event_frame: pd.DataFrame,
@@ -226,11 +256,26 @@ def predict_from_feature_frames(
             direction_threshold,
         ),
     }
+    downside_gate = _downside_gate_result(
+        bundle.thresholds,
+        news_probability=news_probability,
+        direction_score=direction_score,
+        regime=regime,
+    )
+    if downside_gate["enabled"]:
+        tiers["downside"] = downside_gate
+
+    raw_direction = "UP" if direction_score >= direction_threshold else "DOWN"
+    final_direction = raw_direction
     active_tier = None
-    for key in ("strong", "high_confidence", "normal"):
-        if tiers[key]["alert"]:
-            active_tier = tiers[key]["tier"]
-            break
+    if downside_gate["alert"]:
+        active_tier = downside_gate["tier"]
+        final_direction = "DOWN"
+    else:
+        for key in ("strong", "high_confidence", "normal"):
+            if tiers[key]["alert"]:
+                active_tier = tiers[key]["tier"]
+                break
 
     return {
         "ticker": bundle.manifest["target_ticker"],
@@ -242,7 +287,9 @@ def predict_from_feature_frames(
         "drawdown": drawdown,
         "event_regime": regime,
         "direction_probability_up": direction_score,
-        "direction": "UP" if direction_score >= direction_threshold else "DOWN",
+        "direction_raw": raw_direction,
+        "direction": final_direction,
         "active_tier": active_tier,
+        "downside_gate": downside_gate,
         "tiers": tiers,
     }

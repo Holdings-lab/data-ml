@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import shutil
 import sys
@@ -52,6 +53,42 @@ from shared.training.metrics import (
     serialize_timestamp,
     to_serializable_config,
 )
+
+
+DOWNSIDE_GATE_BY_TICKER: dict[str, dict[str, Any]] = {
+    "QQQ": {
+        "enabled": True,
+        "tier": "Downside",
+        "event_regimes": ["deep_drawdown"],
+        "news_event_probability_min": 0.52,
+        "direction_probability_up_max": 0.42,
+        "selection_source": "data/training/downside_threshold_search_h16/qqq_top_downside_thresholds.csv",
+    },
+    "XLE": {
+        "enabled": True,
+        "tier": "Downside",
+        "event_regimes": ["middle_drawdown"],
+        "news_event_probability_min": 0.84,
+        "direction_probability_up_max": 0.60,
+        "selection_source": "data/training/downside_threshold_search_h16/xle_top_downside_thresholds.csv",
+    },
+    "XLF": {
+        "enabled": True,
+        "tier": "Downside",
+        "event_regimes": ["deep_drawdown", "middle_drawdown"],
+        "news_event_probability_min": 0.90,
+        "direction_probability_up_max": 0.42,
+        "selection_source": "data/training/downside_threshold_search_h16/xlf_top_downside_thresholds.csv",
+    },
+    "XLV": {
+        "enabled": True,
+        "tier": "Downside",
+        "event_regimes": ["deep_drawdown", "middle_drawdown", "shallow_drawdown"],
+        "news_event_probability_min": 0.43,
+        "direction_probability_up_max": 0.24,
+        "selection_source": "data/training/downside_threshold_search_h16/xlv_top_downside_thresholds.csv",
+    },
+}
 
 
 def default_bundle_root(target_ticker: str, horizon: int) -> Path:
@@ -379,6 +416,18 @@ def export_bundle(args: argparse.Namespace) -> Path:
             "shallow_drawdown": float(STRONG_THRESHOLDS[2]),
         },
         "direction_threshold": float(args.direction_threshold),
+        "downside_gate": copy.deepcopy(
+            DOWNSIDE_GATE_BY_TICKER.get(
+                target_ticker.upper(),
+                {
+                    "enabled": False,
+                    "tier": "Downside",
+                    "event_regimes": [],
+                    "news_event_probability_min": 1.0,
+                    "direction_probability_up_max": 0.0,
+                },
+            )
+        ),
     }
     feature_schema = {
         "target_ticker": target_ticker,

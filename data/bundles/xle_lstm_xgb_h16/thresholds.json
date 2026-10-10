@@ -20,5 +20,15 @@
     "middle_drawdown": 0.84,
     "shallow_drawdown": 0.99
   },
-  "direction_threshold": 0.4
+  "direction_threshold": 0.4,
+  "downside_gate": {
+    "enabled": true,
+    "tier": "Downside",
+    "event_regimes": [
+      "middle_drawdown"
+    ],
+    "news_event_probability_min": 0.84,
+    "direction_probability_up_max": 0.6,
+    "selection_source": "data/training/downside_threshold_search_h16/xle_top_downside_thresholds.csv"
+  }
 }

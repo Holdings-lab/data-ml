@@ -162,6 +162,8 @@ def _append_pending_prediction(
     normal_alert = _bool_from_tier(result, "normal")
     high_confidence_alert = _bool_from_tier(result, "high_confidence")
     strong_alert = _bool_from_tier(result, "strong")
+    downside_gate = result.get("downside_gate", {})
+    downside_alert = bool(downside_gate.get("alert", False))
 
     row = {
         "prediction_id": prediction_id,
@@ -175,11 +177,20 @@ def _append_pending_prediction(
         "drawdown": float(result["drawdown"]),
         "event_regime": result["event_regime"],
         "pred_direction": result["direction"],
+        "pred_direction_raw": result.get("direction_raw", result["direction"]),
         "direction_probability_up": float(result["direction_probability_up"]),
         "active_tier": active_tier,
         "normal_alert": normal_alert,
         "high_confidence_alert": high_confidence_alert,
         "strong_alert": strong_alert,
+        "downside_alert": downside_alert,
+        "downside_event_regimes": "|".join(downside_gate.get("event_regimes", [])),
+        "downside_news_event_probability_min": downside_gate.get(
+            "news_event_probability_min"
+        ),
+        "downside_direction_probability_up_max": downside_gate.get(
+            "direction_probability_up_max"
+        ),
         "predicted_alert": bool(active_tier),
         "bundle_path": str(bundle_path),
         "news_features_path": str(news_features_path),
