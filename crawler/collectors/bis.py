@@ -12,7 +12,6 @@ from urllib.parse import urljoin
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, ElementClickInterceptedException
@@ -27,6 +26,7 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.common import clean_text, create_retry_session
 from crawler.support_legacy.data_paths import collected_csv_path
 
 
@@ -48,13 +48,6 @@ MONTH_DATE_PATTERN = (
     r"(January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4}"
 )
-
-
-def clean_text(text: Optional[str]) -> str:
-    """연속 공백/줄바꿈을 1칸 공백으로 정리한다."""
-    if not text:
-        return ""
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_date(date_text: str) -> Optional[str]:
@@ -215,8 +208,6 @@ def create_requests_session() -> requests.Session:
     BIS는 간헐적으로 느리거나(그에 따른 read timeout) rate limit(429)을 걸 수 있어,
     재시도/백오프/커넥션 재사용이 있는 세션을 사용한다.
     """
-    session = requests.Session()
-    session.headers.update(HEADERS)
 
     retry = Retry(
         total=5,
@@ -230,10 +221,7 @@ def create_requests_session() -> requests.Session:
         respect_retry_after_header=True,
     )
 
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+    return create_retry_session(HEADERS, retry, pool_connections=10, pool_maxsize=10)
 
 
 def extract_article(

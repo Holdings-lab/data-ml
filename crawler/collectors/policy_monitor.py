@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import os
+import tempfile
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -12,7 +14,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
@@ -20,10 +21,12 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.common import fetch_soup
+from crawler.collectors.common import clean_text as _clean_text
 from crawler.collectors.bis import create_requests_session, crawl_bis_news_index_selenium, extract_article
 from crawler.collectors.eia import get_steo_body, get_steo_items, get_today_body, get_today_items
 from crawler.collectors.fraser import DEFAULT_KEYWORDS as FRASER_DEFAULT_KEYWORDS, collect_fraser_documents
-from crawler.collectors.fed import crawl_implementation_note, crawl_fomc_statement, crawl_minutes
+from crawler.collectors.fed import crawl_statement, crawl_minutes
 from crawler.collectors.yfinance import scrape_news_sync as scrape_yahoo_news
 from crawler.collectors.yfinance_support import scrape_news_sync as scrape_yahoo_news_support
 from crawler.collectors.fda import crawl_fda_press_releases_24
@@ -33,13 +36,17 @@ from crawler.collectors.ucsb import (
     load_keyword_dictionary,
     parse_article,
 )
-from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
 
 BASE_URL = "https://www.federalreserve.gov"
 FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
 DEFAULT_OUTPUT_CSV = "/opt/riseai/data/crawler/policy_updates_features.csv"
 DEFAULT_OLD_DATA_CSV = "/opt/riseai/data/crawler/old_data.csv"
+
+
+# DEFAULT_OUTPUT_CSV = "policy_updates_features.csv"
+# DEFAULT_OLD_DATA_CSV = "old_data.csv"
+
 DEFAULT_INTERVAL_SEC = 24 * 60 * 60 # 하루 1회 실행 주기 (초 단위)
 US_EASTERN_TZ = ZoneInfo("America/New_York")    # 미국 동부시간 기준
 KEYWORD_CONFIG_DIR = Path(__file__).with_name("keywords")   # American Presidential Project 관련 키워드 JSON 파일이 있는 디렉토리
@@ -82,21 +89,30 @@ HEADERS = {
 }
 
 
-def _clean_text(text: str | None) -> str:
-    if not text:
-        return ""
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _parse_us_date(raw_value: str) -> date | None:
+def _parse_us_date(raw_value: str | None) -> date | None:
     """
     args: raw_value (str) - Month Day, Year 형식의 날짜 문자열
     returns: date | None - date 객체 또는 None
     """
     try:
         return datetime.strptime(raw_value, "%B %d, %Y").date()
-    except ValueError:
+    except (TypeError, ValueError):
         return None
+
+
+def _parse_iso_date(raw_value: str | None) -> date | None:
+    if not isinstance(raw_value, str):
+        return None
+    try:
+        return date.fromisoformat(raw_value)
+    except ValueError:
+        try:
+            published = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if published.tzinfo is not None:
+            published = published.astimezone(US_EASTERN_TZ)
+        return published.date()
 
 
 def _format_iso_date(raw_value: str | None) -> str:
@@ -124,12 +140,12 @@ def _seconds_until_next_us_eastern_midnight() -> float:
     current_dt = _us_eastern_now()
     # 다음 자정까지 남은 초를 계산해 하루 1회 실행 주기를 만든다.
     next_midnight = current_dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    return max(0.0, (next_midnight - current_dt).total_seconds())
+    return max(0.0, next_midnight.timestamp() - current_dt.timestamp())
 
 
 def _normalise_records(records: list[dict[str, Any]]) -> pd.DataFrame:
     if not records:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=CANONICAL_COLUMNS)
 
     df = pd.DataFrame(records)
 
@@ -144,7 +160,7 @@ def _normalise_records(records: list[dict[str, Any]]) -> pd.DataFrame:
 
     # Normalize release_date to ISO format (YYYY-MM-DD) when possible.
     if "release_date" in df.columns:
-        parsed = pd.to_datetime(df["release_date"], errors="coerce")
+        parsed = pd.to_datetime(df["release_date"], format="mixed", errors="coerce", utc=True)
         df["release_date"] = parsed.dt.strftime("%Y-%m-%d").fillna("")
 
     ordered_columns = [column for column in CANONICAL_COLUMNS if column in df.columns]
@@ -176,16 +192,14 @@ def _tag_records(records: list[dict[str, Any]], sector: str) -> list[dict[str, A
     return tagged_records
 
 
-def _collect_fomc_records(target_date: datetime) -> list[dict[str, Any]]:
+def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
     # FOMC는 캘린더 페이지를 읽고 statement, minutes, implementation note를 구분한다.
-    response = requests.get(FOMC_CALENDAR_URL, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = fetch_soup(FOMC_CALENDAR_URL, headers=HEADERS, timeout=30, client=requests)
     records: list[dict[str, Any]] = []
 
-    section = soup.find("div", class_="panel-default")
-    meetings = section.find_all("div", class_="fomc-meeting")
+    meetings = soup.find_all("div", class_="fomc-meeting")
+    if not meetings:
+        raise ValueError("FOMC calendar contains no meeting entries")
 
     for meeting in meetings:
         for link in meeting.find_all("a", href=True):
@@ -197,7 +211,7 @@ def _collect_fomc_records(target_date: datetime) -> list[dict[str, Any]]:
 
             if "implementation note" in label:
                 doc_type = "implementation_note"
-                article = crawl_implementation_note(url)
+                article = crawl_statement(url)
             elif label == "html":
                 parent_strong = link.parent.find("strong") if link.parent else None
                 if parent_strong is None:
@@ -207,7 +221,7 @@ def _collect_fomc_records(target_date: datetime) -> list[dict[str, Any]]:
 
                 if "statement:" in parent_title:
                     doc_type = "statement"
-                    article = crawl_fomc_statement(url)
+                    article = crawl_statement(url)
                 elif "minutes:" in parent_title:
                     doc_type = "minutes"
                     article = crawl_minutes(url)
@@ -216,7 +230,7 @@ def _collect_fomc_records(target_date: datetime) -> list[dict[str, Any]]:
                         r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
                         link.parent.get_text(" ", strip=True),
                     )
-                    if release_match:
+                    if release_match and article:
                         article["release_date"] = release_match.group(1)
 
             if not doc_type or not article:
@@ -251,7 +265,7 @@ def _collect_fraser_records(target_date: date) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for _, row in frame.iterrows():
         release_date = str(row.get("release_date", ""))
-        if date.fromisoformat(release_date) != target_date:
+        if _parse_iso_date(release_date) != target_date:
             continue
 
         records.append(
@@ -276,7 +290,7 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
 
     for item in get_steo_items(start_date=start_date):
         release_date = str(item.get("release_date", ""))
-        if date.fromisoformat(release_date) != target_date:
+        if _parse_iso_date(release_date) != target_date:
             continue
 
         url = str(item.get("url", ""))
@@ -295,7 +309,7 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
 
     for item in get_today_items(start_date=start_date):
         release_date = str(item.get("release_date", ""))
-        if date.fromisoformat(release_date) != target_date:
+        if _parse_iso_date(release_date) != target_date:
             continue
 
         url = str(item.get("url", ""))
@@ -368,7 +382,9 @@ def _collect_bis_records(target_date: date, max_pages: int, sleep_sec: float) ->
 
 
 def _collect_fda_records(target_date: date) -> list[dict[str, Any]]:
-    fda_records = crawl_fda_press_releases_24(target_date=target_date)
+    # FDA 수집기는 목록의 datetime 및 target_date.date()를 사용한다.
+    fda_target = datetime.combine(target_date, datetime.min.time())
+    fda_records = crawl_fda_press_releases_24(target_date=fda_target)
 
     if not fda_records:
         return []
@@ -377,7 +393,8 @@ def _collect_fda_records(target_date: date) -> list[dict[str, Any]]:
     for row in fda_records:
         release_date = str(row.get("release_date", ""))
 
-        if date.fromisoformat(release_date) != target_date:
+        published_date = _parse_iso_date(release_date)
+        if published_date != target_date:
             continue
 
         records.append(
@@ -385,7 +402,7 @@ def _collect_fda_records(target_date: date) -> list[dict[str, Any]]:
                 "source": "FDA",
                 "category": "FDA",
                 "doc_type": "press_release",
-                "release_date": release_date,
+                "release_date": published_date.isoformat(),
                 "url": str(row.get("url", "")),
                 "title": str(row.get("title", "")),
                 "image": "",
@@ -426,7 +443,7 @@ def _collect_ucsb_records(
             if article is None:
                 continue
 
-            published_date_value = _parse_us_date(article.get("published_date"))
+            published_date_value = _parse_iso_date(article.get("published_date"))
             if published_date_value != target_date:
                 continue
 
@@ -449,7 +466,12 @@ def _collect_ucsb_records(
 
 
 def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any]]:
-    yahoo_records = scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
+    ticker = ticker.lower()
+    try:
+        yahoo_records = scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
+    except Exception as exc:
+        print(f"[MONITOR] Yahoo primary collector failed; trying fallback: {exc}")
+        yahoo_records = []
 
     if not yahoo_records:
         yahoo_records = scrape_yahoo_news_support(tickers=[ticker.upper()], target_date=target_date.isoformat())
@@ -465,7 +487,7 @@ def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any
 
         release_date = str(row.get("release_date", ""))
 
-        if date.fromisoformat(release_date) != target_date:
+        if _parse_iso_date(release_date) != target_date:
             continue
 
         records.append(
@@ -489,6 +511,7 @@ def _collect_sector_records(
     target_date: date,
     bis_max_pages: int,
     sleep_sec: float,
+    shared_records: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     sector_config = SECTOR_MONITOR_CONFIGS.get(sector)
     if sector_config is None:
@@ -498,7 +521,14 @@ def _collect_sector_records(
     sector_records: list[dict[str, Any]] = []
 
     if "FOMC" in sector_sources:
-        sector_records.extend(_tag_records(_collect_fomc_records(target_date), sector))
+        # 호출 주기 안에서 빈 결과까지 공유한다. 전역 캐시는 날짜 변경 시 stale해질 수 있다.
+        if shared_records is None:
+            fomc_records = _collect_fomc_records(target_date)
+        else:
+            if "FOMC" not in shared_records:
+                shared_records["FOMC"] = _collect_fomc_records(target_date)
+            fomc_records = shared_records["FOMC"]
+        sector_records.extend(_tag_records(fomc_records, sector))
     if "BIS" in sector_sources:
         sector_records.extend(
             _tag_records(
@@ -542,6 +572,7 @@ def collect_policy_updates(
 
     new_records: list[dict[str, Any]] = []
     seen_urls = set()
+    shared_records: dict[str, list[dict[str, Any]]] = {}
 
     for sector in MONITOR_SECTORS:
         print(f"[MONITOR] Starting {sector.upper()} crawl for {target_date.isoformat()}")
@@ -550,6 +581,7 @@ def collect_policy_updates(
             target_date=target_date,
             bis_max_pages=bis_max_pages,
             sleep_sec=sleep_sec,
+            shared_records=shared_records,
         )
 
         for record in sector_records:
@@ -569,6 +601,9 @@ def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
     주어진 DataFrame에 통합 후처리를 적용하고 처리된 DataFrame을 반환한다.
     """
+    from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
+    from crawler.validating.monitor_validation import validate_yahoo_summaries
+
     print("[MONITOR] 통합 후처리 파이프라인을 실행 중...")
     try:
         result_df = apply_unified_pipeline(
@@ -577,12 +612,57 @@ def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             include_encoding=True,
             include_sentiment=True,
             include_embeddings=True,
+            post_summary_hook=lambda summarized: validate_yahoo_summaries(
+                summarized, source_records=df,
+            ),
         )
         print(f"[MONITOR] 통합 후처리 파이프라인 완료: {len(result_df)} rows 처리됨")
         return result_df
     except Exception as e:
         print(f"[MONITOR] ERROR: 통합 후처리 파이프라인 실패: {e}")
         raise
+
+
+def _write_csv_atomic(frame: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as handle:
+            temporary_path = Path(handle.name)
+        frame.to_csv(temporary_path, index=False, encoding="utf-8-sig")
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _save_monitor_results(processed_news: pd.DataFrame, processed_path: Path, old_news_path: Path) -> None:
+    # 읽기 실패는 전파한다. 손상되거나 잠긴 기존 파일을 빈 데이터로 덮어쓰지 않는다.
+    existing = pd.read_csv(processed_path, encoding="utf-8-sig") if processed_path.exists() else pd.DataFrame()
+    combined = pd.concat([existing, processed_news], ignore_index=True, sort=False) if not existing.empty else processed_news.copy()
+    if {"sector", "url"}.issubset(combined.columns):
+        combined = combined.drop_duplicates(subset=["sector", "url"], keep="last")
+    if "sector" in combined.columns:
+        combined = combined[["sector"] + [column for column in combined.columns if column != "sector"]]
+
+    recent = combined
+    if not combined.empty and "release_date" in combined.columns:
+        parsed = pd.to_datetime(combined["release_date"], format="mixed", errors="coerce", utc=True)
+        cutoff = pd.Timestamp(_us_eastern_now().date(), tz="UTC") - pd.Timedelta(days=20)
+        is_old = parsed < cutoff
+        aged = combined[is_old]
+        recent = combined[~is_old]
+        if not aged.empty:
+            if old_news_path.exists():
+                archive = pd.read_csv(old_news_path, encoding="utf-8-sig")
+                aged = pd.concat([archive, aged], ignore_index=True, sort=False)
+            if {"sector", "url"}.issubset(aged.columns):
+                aged = aged.drop_duplicates(subset=["sector", "url"], keep="last")
+            # 보관 파일을 먼저 확정한다. 이후 실패해도 재실행 시 중복 제거로 복구한다.
+            _write_csv_atomic(aged, old_news_path)
+            print(f"[MONITOR] 보관 파일: {old_news_path} / {len(aged)} rows")
+    _write_csv_atomic(recent, processed_path)
+    print(f"[MONITOR] 모니터링 결과: {processed_path} / {len(recent)} rows")
 
 
 def run_monitor(
@@ -592,11 +672,17 @@ def run_monitor(
     sleep_sec: float = 1.0,                                # Rate limit을 피하기 위해 요청 사이에 1초 정도 쉬는 것이 안전
     max_cycles: int | None = None,
 ) -> None:
+    if max_cycles is not None and max_cycles < 1:
+        raise ValueError("max_cycles must be at least 1")
+    if sleep_sec < 0 or bis_max_pages < 1:
+        raise ValueError("sleep_sec must be nonnegative and bis_max_pages positive")
     cycle = 0
     
     processed_path = Path(output_path)
     # old_news.csv는 메인 출력 파일과 같은 디렉토리에 저장하도록 경로 설정
-    old_news_path = Path(DEFAULT_OLD_DATA_CSV)
+    old_news_path = processed_path.parent / Path(DEFAULT_OLD_DATA_CSV).name
+    if processed_path.resolve() == old_news_path.resolve():
+        raise ValueError("Output and archive paths must differ")
 
     while True:
         target_date = _get_target_date()
@@ -616,67 +702,13 @@ def run_monitor(
             print(f"[MONITOR] 수집한 뉴스 개수 : {news_count}개")
             processed_news = run_postprocessing_pipeline(df=news_list)
 
-            # 1. 이전에 저장된 csv 파일 읽기
-            if processed_path.exists():
-                try:
-                    existing_news = pd.read_csv(processed_path, encoding="utf-8-sig")
-                except Exception:
-                    existing_news = pd.DataFrame()
-            else:
-                existing_news = pd.DataFrame()
-
-            # 2. 데이터 병합
-            if existing_news.empty:
-                combined_news = processed_news.copy()
-            else:
-                combined_news = pd.concat([existing_news, processed_news], ignore_index=True, sort=False)
-
-            # 3. 중복 제거 및 컬럼 정렬
-            if not combined_news.empty and {"sector", "url"}.issubset(combined_news.columns):
-                combined_news = combined_news.drop_duplicates(subset=["sector", "url"], keep="last")
-
-            if "sector" in combined_news.columns:
-                ordered_columns = ["sector"] + [column for column in combined_news.columns if column != "sector"]
-                combined_news = combined_news[ordered_columns]
-
-            # 4. 20일 경과 데이터 필터링 및 old_news 분리
-
-            if not combined_news.empty and "release_date" in combined_news.columns:
-                # 안전한 비교를 위해 datetime으로 변환 후 시간대(timezone) 정보 제거
-                parsed_dates = pd.to_datetime(combined_news["release_date"], errors='coerce').dt.tz_localize(None)
-                cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=20)
-                
-                # 20일이 지난 데이터 마스킹 (NaT 등 파싱 실패한 데이터는 최신으로 간주하여 보존)
-                is_old_mask = parsed_dates < cutoff_date
-                
-                aged_out_news = combined_news[is_old_mask]
-                recent_news = combined_news[~is_old_mask]
-
-                # [I/O 최소화 포인트] 20일 지난 데이터가 "실제로 존재할 때만" old_news.csv를 읽고 씁니다.
-                if not aged_out_news.empty:
-                    if old_news_path.exists():
-                        try:
-                            old_news_df = pd.read_csv(old_news_path, encoding="utf-8-sig")
-                            aged_out_news = pd.concat([old_news_df, aged_out_news], ignore_index=True, sort=False)
-                            # old_news에서도 중복 방지
-                            if {"sector", "url"}.issubset(aged_out_news.columns):
-                                aged_out_news = aged_out_news.drop_duplicates(subset=["sector", "url"], keep="last")
-                        except Exception:
-                            pass
-                    
-                    # old_news.csv 저장
-                    aged_out_news.to_csv(old_news_path, index=False, encoding="utf-8-sig")
-                    print(f"[MONITOR] 20일 경과 뉴스 {len(aged_out_news)}건을 {old_news_path.name}로 이동했습니다.")
-            else:
-                recent_news = combined_news
-
-            # 최신 데이터만 원본 파일에 덮어쓰기 저장
-            recent_news.to_csv(processed_path, index=False, encoding="utf-8-sig")
-            print(f"[MONITOR] 모니터링 결과 저장 위치 : {processed_path} / 개수 : {len(recent_news)}")
-            
         else:
             print("[MONITOR] 수집된 뉴스가 없습니다.")
-            # 수집된 뉴스가 없을 때는 기존 파일을 열어서 날짜를 확인하는 작업을 생략하여 I/O를 최소화했습니다.
+            processed_news = pd.DataFrame(columns=CANONICAL_COLUMNS)
+
+        # 수집 결과가 없어도 기존 데이터의 보관 기간을 적용한다.
+        if not processed_news.empty or processed_path.exists():
+            _save_monitor_results(processed_news, processed_path, old_news_path)
 
         if max_cycles is not None and cycle >= max_cycles:
             break
@@ -684,14 +716,14 @@ def run_monitor(
         if interval_sec <= 0:
             break
 
-        if interval_sec >= DEFAULT_INTERVAL_SEC:
+        if interval_sec == DEFAULT_INTERVAL_SEC:
             time.sleep(_seconds_until_next_us_eastern_midnight())
         else:
             time.sleep(interval_sec)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="[Monitor] FOMC, BIS, FRASER, EIA, UCSB, YAHOO updates for the previous America/New_York day")
+    parser = argparse.ArgumentParser(description="[Monitor] FOMC, BIS, FRASER, EIA, UCSB, FDA, YAHOO updates for the previous America/New_York day")
     parser.add_argument("--output-path", type=str, default=DEFAULT_OUTPUT_CSV, help="수집 결과 CSV 파일 경로")
     parser.add_argument("--interval-sec", type=float, default=DEFAULT_INTERVAL_SEC, help="모니터링 간격 (초 단위); 기본값은 다음 America/New_York 자정에 스케줄링됩니다")
     parser.add_argument("--bis-max-pages", type=int, default=1)
@@ -706,7 +738,6 @@ def main() -> None:
         sleep_sec=args.sleep_sec,
         max_cycles=args.max_cycles,
     )
-
 
 if __name__ == "__main__":
     main()

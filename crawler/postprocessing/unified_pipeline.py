@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Callable
 import time
 from pathlib import Path
 
@@ -105,35 +106,57 @@ def apply_text_summarization(df: pd.DataFrame, max_chars: int = MAX_SUMMARY_CHAR
                 continue
             print(f"[SUMMARIZE] 요약 시작 {i}/{len(indices)} row={idx} body_len={len(text)}")
 
-            if df.at[idx, "category"] == "YAHOO":
-                # system prompt: 모델의 역할, 절대적 규칙, 금지 사항 명시
-                system_prompt = """
-                You are a document summarization engine.
+            # if df.at[idx, "category"] == "YAHOO" and "sector" in df.columns:
+            if "sector" in df.columns:
+                sector = str(df.at[idx, "sector"]).strip()
+                system_prompt = f"""
+                You are a document relevance filtering and summarization engine.
 
-                Rules:
+                Your task is to determine whether the document is meaningfully relevant to the {sector} sector.
 
+                If the document is relevant, produce an abstractive summary.
+                If the document is not relevant, output nothing.
+
+                Relevance Rules:
+                - A document is relevant when its main subject, event, policy, regulation, corporate action, or industry development has a direct and meaningful connection to the {sector} sector or companies operating in that sector.
+                - Sector relevance must be supported by the actual content of the document.
+                - A brief or incidental mention of the {sector} sector, a related company, the stock market, or general economic conditions is not sufficient.
+                - General macroeconomic news should not be considered relevant unless the document explicitly describes a meaningful connection to the {sector} sector.
+                - Do not infer sector relevance from information that is not stated in the document.
+                - If the document is not meaningfully relevant to the {sector} sector, return an empty response.
+                - If relevant, output only the summary.
+
+                Summary Rules:
                 - Produce an abstractive summary.
-                - Rewrite everything in your own words.
+                - Rewrite the content in your own words.
                 - Never copy complete sentences from the source.
                 - Never reproduce long phrases from the source except proper nouns, dates, or exact numbers.
-                - Compress the content substantially while preserving the factual meaning.
-                - Remove redundant wording, examples, advertisements, opinions, and repetition.
-                - Preserve only factual information explicitly stated.
-                - Output only the summary text.
+                - Compress the content substantially while preserving factual meaning.
+                - Preserve only factual information explicitly stated in the document.
+                - Remove advertisements, promotional language, opinions, examples, repetition, and unrelated information.
+                - Prioritize facts directly relevant to the {sector} sector.
+                - Preserve important entities, dates, monetary amounts, percentages, and other key numerical facts when relevant.
+                - Do not add interpretations, predictions, assumptions, or external knowledge.
+                - Output only the summary text or an empty response.
                 """.strip()
 
-                # user content: 동적 변수를 활용한 개별 요약 요청
 
                 user_content = f"""
-                Summarize the following document in English.
+                Evaluate the following document for relevance to the {sector} sector.
+
+                If the document is not meaningfully relevant to the {sector} sector,
+                return an empty response.
+
+                If the document is relevant, summarize it in English.
 
                 The summary MUST:
                 - Be significantly shorter than the original document.
-                - Rewrite the content using new wording.
-                - Not copy complete sentences from the source.
-                - Preserve only essential factual information.
-                - Begin immediately with the main action or decision.
                 - Stay under {max_chars} characters.
+                - Preserve only essential factual information.
+                - Prioritize information directly relevant to the {sector} sector.
+                - Preserve important names, dates, monetary amounts, percentages, and other key numerical facts.
+                - Begin immediately with the main action, event, or decision.
+                - Contain no labels, explanations, relevance scores, or commentary.
 
                 Document:
                 {text}
@@ -171,6 +194,11 @@ def apply_text_summarization(df: pd.DataFrame, max_chars: int = MAX_SUMMARY_CHAR
         print(f"[SUMMARIZE] 요약할 행이 존재하지 않음")
 
     df.rename(columns={BODY_COL: BODY_SUMMARY_COL}, inplace=True)
+    df = df[
+        df[BODY_SUMMARY_COL].notna() &
+        df[BODY_SUMMARY_COL].str.strip().ne("")
+        ].copy()
+
     return df
 
 
@@ -275,6 +303,7 @@ def apply_unified_pipeline(
     include_encoding: bool = True,
     include_sentiment: bool = True,
     include_embeddings: bool = True,
+    post_summary_hook: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """데이터프레임에 통합 후처리 파이프라인을 적용합니다.
 
@@ -286,6 +315,8 @@ def apply_unified_pipeline(
         처리된 DataFrame. 이 함수는 파일을 저장하지 않으며,
         결과 저장은 호출자가 담당합니다.
     """
+    if post_summary_hook is not None and not include_summarization:
+        raise ValueError("post_summary_hook requires summarization")
     if df is None:
         print("[UNIFIED] ERROR: input dataframe is None")
         return pd.DataFrame()
@@ -297,7 +328,9 @@ def apply_unified_pipeline(
     if include_summarization:
         print("[UNIFIED] Step 1/4: Text Summarization")
         df = apply_text_summarization(df)
-    
+        if post_summary_hook is not None:
+            df = post_summary_hook(df)
+
     if include_encoding:
         print("[UNIFIED] Step 2/4: One-hot Encoding")
         df = apply_one_hot_encoding(df)
@@ -305,7 +338,7 @@ def apply_unified_pipeline(
     if include_sentiment:
         print("[UNIFIED] Step 3/4: Sentiment Analysis")
         df = apply_sentiment_analysis(df)
-    
+
     if include_embeddings:
         print("[UNIFIED] Step 4/4: Embeddings")
         df = apply_embeddings(df)
@@ -318,13 +351,15 @@ def main() -> None:
     print("[UNIFIED] Starting unified postprocessing pipeline...")
     
     try:
-        input_path = collected_csv_path("policy_updates_monitor.csv")
+        input_path = collected_csv_path("yahoo_market_news_2026-10-09.csv")
+        output_path = feature_csv_path("processed_yahoo_market_news_2026-10-09.csv")
         if not Path(input_path).exists():
             print(f"[UNIFIED] ERROR: input file not found: {input_path}")
             return
 
         df = pd.read_csv(input_path, encoding="utf-8-sig")
         df = apply_unified_pipeline(df=df)
+        df.to_csv(output_path, index=False, encoding="utf-8-sig")
         print(f"[UNIFIED] SUCCESS: processed {len(df)} rows")
     except Exception as e:
         print(f"[UNIFIED] FAILED: {e}")

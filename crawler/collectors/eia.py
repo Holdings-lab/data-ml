@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import re
 from pathlib import Path
 from urllib.parse import urljoin
@@ -11,6 +12,12 @@ import requests
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from crawler.collectors.common import fetch_soup
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -194,9 +201,7 @@ def get_today_body(url):
 def _fetch_soup(url: str) -> BeautifulSoup | None:
     """공통: URL을 요청하고 BeautifulSoup 객체를 반환합니다. 실패 시 None을 반환합니다."""
     try:
-        response = requests.get(url, headers=headers, timeout=(5, 30))
-        response.raise_for_status()
-        return BeautifulSoup(response.text, "html.parser")
+        return fetch_soup(url, headers=headers, timeout=(5, 30), client=requests)
     except requests.RequestException as exc:
         logger.exception("Request failed for %s: %s", url, exc)
         return None

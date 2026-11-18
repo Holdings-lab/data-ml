@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import time
 import re
 import sys
@@ -16,6 +15,7 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.common import write_csv_records
 from crawler.support_legacy.data_paths import collected_csv_path
 
 # 미국 뉴욕 시간대 고정 (서머타임 자동 계산)
@@ -23,16 +23,16 @@ NY_TZ = ZoneInfo("America/New_York")
 
 # 기본 타겟 데이트: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-TICKERS = ["QQQ", "XLF", "XLE"]
+TICKERS = ["QQQ", "XLF", "XLE", "XLV"]
 
 
 def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
 
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["sector", "title", "url", "release_date", "image", "body"])
-        writer.writeheader()
-        writer.writerows(records)
+    write_csv_records(
+        csv_path, records,
+        ["sector", "title", "url", "release_date", "image", "body"],
+    )
 
     return csv_path
 
@@ -95,7 +95,7 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
 
             for i in range(10):
                 list_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                # list_page.mouse.wheel(0, 5000)
+                list_page.mouse.wheel(0, 5000)
                 list_page.wait_for_timeout(2000)
 
 
@@ -155,16 +155,15 @@ def scrape_news_sync(target_date=TARGET_DATE, tickers=TICKERS):
                         continue
 
                     # 2. 날짜 검증 (target_date보다 과거면 카운트 증가)
-                    if date_str != "N/A":
-                        if date_str < target_date:
-                            print(f"    [{i}] 과거 기사 발견 ({date_str})")
-                            out_of_date_count += 1
-                            continue
-                        elif date_str > target_date:
-                            print(f"    [{i}] {target_date} 이후 기사 발견 ({date_str})")
-                            out_of_date_count = 0
-                        else:
-                            out_of_date_count = 0
+                    if date_str < target_date:
+                        print(f"    [{i}] 과거 기사 발견 ({date_str})")
+                        out_of_date_count += 1
+                        continue
+                    elif date_str > target_date:
+                        print(f"    [{i}] {target_date} 이후 기사 발견 ({date_str})")
+                        out_of_date_count = 0
+                    else:
+                        out_of_date_count = 0
                     
                     # 3. 본문 추출
                     body_tag = soup_inner.find("div", class_="bodyItems-wrapper") or soup_inner.find(class_="caas-body")

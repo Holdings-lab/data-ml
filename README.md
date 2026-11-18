@@ -2,7 +2,15 @@
 
 최종 점검일: 2026-05-26. 이 README는 현재 코드와 `data/training/**/metadata.json`, 비교 JSON, 클러스터 리포트를 다시 읽고 맞춘 기준이다.
 
-이 저장소는 정책/거시 뉴스 수집, 뉴스 후처리, 시장 가격 피처 생성, XGBoost 회귀 학습, market-only와 market-news 비교, 예측 수익률 profile 리포트까지 관리하는 실험 파이프라인이다. 현재 메인 실행 경로는 `shared/` 아래 코드이고, `crawler/support_legacy/`와 `TEST/`는 보조/레거시 성격이 강하다.
+이 저장소는 정책/거시 뉴스 수집, 뉴스 후처리, 시장 가격 피처 생성, XGBoost 회귀 학습, market-only와 market-news 비교, 예측 수익률 profile 리포트까지 관리하는 실험 파이프라인이다. 메인 학습 실행 경로는 `shared/`다. `crawler/`는 수집·후처리·검증을, `TEST/`는 검증 테스트와 독립 학습 실험을 담는다. 수집·후처리 공통 경로는 `crawler/support_legacy/data_paths.py`에서 관리한다.
+
+## 레거시 코드 호환 안내 (2026-11-19)
+
+- 공통 경로 import는 기존 `crawler.support_legacy.data_paths`를 사용한다.
+- `crawler/support_legacy/`의 기존 실행기·보조 함수·CSV 출력 확인 스크립트와 `collector_20days.py`를 복구했다. 현재 수집 진입점은 `crawler/collectors/policy_monitor.py`다.
+- 기존 `FedDocument` 스키마와 `qqq_legacy` 프리셋을 지원한다.
+- 학습 입력 기본값은 `data/crawler/features/{ticker}/merged_finbert_with_embeddings.csv`다. 예전 flat CSV는 `--news-input`으로 명시한다. 데이터 파일은 이동하거나 삭제하지 않았다.
+- 배치 후처리 모듈은 통합 파이프라인에서도 사용하므로 유지한다. `TEST/train_regression.py`도 별도 분석·시각화를 제공하는 독립 실험으로 유지한다.
 
 ## 프로젝트 목적
 
@@ -151,7 +159,7 @@ python crawler/collectors/policy_monitor.py --max-cycles 1 --interval-sec 0
 
 주의: 현재 `policy_monitor.py`의 `run_monitor()` 안에는 테스트용 `target_date_value = datetime(2026, 3, 18).date()` 고정값이 남아 있다. 실제 매일 모니터링으로 쓰려면 `_target_policy_news_date()` 경로로 되돌려야 한다.
 
-레거시 배치 후처리:
+개별 단계 배치 후처리:
 
 ```bash
 python crawler/postprocessing/preprocessing.py

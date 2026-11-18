@@ -4,9 +4,15 @@ from pathlib import Path
 import argparse
 import time
 import re
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import logging
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from crawler.collectors.common import create_retry_session
 
 BASE_URL = "https://fraser.stlouisfed.org/api"
 API_KEY = "9e92168d5b63454b89ef1d4ff149ca69" 
@@ -32,14 +38,9 @@ DEFAULT_KEYWORDS = [
 
 
 def _build_session(retries=3, backoff_factor=1.0, status_forcelist=(429, 500, 502, 504)):
-    session = requests.Session()
     retry = Retry(total=retries, read=retries, connect=retries, backoff_factor=backoff_factor,
                   status_forcelist=status_forcelist, allowed_methods=frozenset(["GET"]))
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    session.headers.update(headers)
-    return session
+    return create_retry_session(headers, retry)
 
 
 def _get_with_backoff(session, url, params=None, max_attempts=5, base_delay=1.5):
@@ -155,8 +156,6 @@ def search_fraser(session, keyword, start_date=None, per_page=100, max_results=N
     aggregate["records"] = records
     return aggregate
 
-
-import re
 
 def fetch_text_body(session, text_url, max_chars=5000):
     if not text_url or text_url == "Text 없음": return ""

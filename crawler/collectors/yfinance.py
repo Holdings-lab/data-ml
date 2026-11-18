@@ -1,6 +1,4 @@
-import csv
 import time
-import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,24 +12,30 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.common import write_csv_records
 from crawler.support_legacy.data_paths import collected_csv_path
 
 # 미국 뉴욕 시간대 고정 (서머타임 자동 계산)
 NY_TZ = ZoneInfo('America/New_York')
 # 기본 타겟 날짜: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-TICKERS = ["QQQ", "XLF", "XLE"]
+TICKERS = ["QQQ", "XLF", "XLE", "XLV"]
 API_KEY = "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5"
 
 def _save_results(records, target_date):
-    csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
+    csv_path = Path(
+        collected_csv_path(f"yahoo_market_news_{target_date}.csv")
+    )
 
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["sector", "title", "release_date", "url", "image", "body"])
-        writer.writeheader()
-        writer.writerows(records)
+    file_exists = csv_path.exists()
+
+    write_csv_records(
+        csv_path, records,
+        ["sector", "title", "release_date", "url", "image", "body"], mode="a", write_header=not file_exists,
+    )
 
     return csv_path
+
 
 def convert_to_et_date(utc_time_str: str) -> str:
     """
@@ -44,7 +48,7 @@ def convert_to_et_date(utc_time_str: str) -> str:
         utc_time_str = utc_time_str.replace('Z', '+00:00')
 
         dt_utc = datetime.fromisoformat(utc_time_str)
-        dt_et = dt_utc.astimezone(ZoneInfo("America/New_York"))
+        dt_et = dt_utc.astimezone(NY_TZ)
         
         return dt_et.strftime("%Y-%m-%d")
 
