@@ -1,0 +1,2 @@
+# Install alongside the project requirements.txt
+pypdf==6.21.4

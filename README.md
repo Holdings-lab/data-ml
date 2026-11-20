@@ -2,7 +2,7 @@
 
 최종 점검일: 2026-05-26. 이 README는 현재 코드와 `data/training/**/metadata.json`, 비교 JSON, 클러스터 리포트를 다시 읽고 맞춘 기준이다.
 
-이 저장소는 정책/거시 뉴스 수집, 뉴스 후처리, 시장 가격 피처 생성, XGBoost 회귀 학습, market-only와 market-news 비교, 예측 수익률 profile 리포트까지 관리하는 실험 파이프라인이다. 메인 학습 실행 경로는 `shared/`다. `crawler/`는 수집·후처리·검증을, `TEST/`는 검증 테스트와 독립 학습 실험을 담는다. 수집·후처리 공통 경로는 `crawler/support_legacy/data_paths.py`에서 관리한다.
+이 저장소는 정책/거시 뉴스 수집, 뉴스 후처리, 시장 가격 피처 생성, XGBoost 회귀 학습, market-only와 market-news 비교, 예측 수익률 profile 리포트까지 관리하는 실험 파이프라인이다. 메인 학습 실행 경로는 `shared/`다. `crawler/`는 수집·후처리·검증을 담는다. 수집·후처리 공통 경로는 `crawler/support_legacy/data_paths.py`에서 관리한다.
 
 ## 레거시 코드 호환 안내 (2026-11-19)
 
@@ -10,7 +10,70 @@
 - `crawler/support_legacy/`의 기존 실행기·보조 함수·CSV 출력 확인 스크립트와 `collector_20days.py`를 복구했다. 현재 수집 진입점은 `crawler/collectors/policy_monitor.py`다.
 - 기존 `FedDocument` 스키마와 `qqq_legacy` 프리셋을 지원한다.
 - 학습 입력 기본값은 `data/crawler/features/{ticker}/merged_finbert_with_embeddings.csv`다. 예전 flat CSV는 `--news-input`으로 명시한다. 데이터 파일은 이동하거나 삭제하지 않았다.
-- 배치 후처리 모듈은 통합 파이프라인에서도 사용하므로 유지한다. `TEST/train_regression.py`도 별도 분석·시각화를 제공하는 독립 실험으로 유지한다.
+- 배치 후처리 모듈은 통합 파이프라인에서도 사용하므로 유지한다.
+
+## 뉴스 수집 상태 JSON
+
+`policy_monitor.py`는 기존 뉴스/보관 CSV 컬럼과 저장 방식을 유지하면서, 출력 CSV 옆에 최신 실행 상태를 별도 저장한다.
+기본 저장 루트는 `/opt/riseai/data/crawler/`다. 뉴스 CSV는 `policy_updates_features.csv`, 상태 JSON은 `policy_updates_features.status.json`으로 저장한다.
+`--status-path` 또는 `run_monitor(status_path=...)`로 JSON 경로를 지정할 수 있다. CSV/보관 파일과 같은 경로는 허용하지 않는다.
+
+```powershell
+python -m crawler.collectors.policy_monitor --max-cycles 1
+```
+
+| `status` | 의미 |
+| --- | --- |
+| `running` | 수집, 후처리 또는 저장 진행 중 |
+| `success` | 모든 대상 출처 정상 완료, 대상 뉴스 존재, 후처리·저장 완료 |
+| `empty` | 모든 대상 출처 정상 완료, 날짜/키워드 필터 적용 후 대상 뉴스 0건 |
+| `partial_failure` | 일부 출처/기사 수집 실패. 확보한 뉴스는 후처리·저장하며 0건이어도 `empty`로 판정하지 않음 |
+| `failed` | 모든 출처 실패 또는 실행·후처리·저장 실패 |
+
+JSON은 섹터별 객체 배열이며 각 객체에는 `sector`, `status`, `errors`만 저장한다.
+상태 표의 의미는 각 섹터의 대상 출처를 기준으로 적용된다. `errors`는 오류 코드와 안내 메시지 배열이며 정상일 때는 빈 배열이다.
+같은 섹터의 동일 오류 코드는 한 번만 저장하며, 처음 발생한 순서와 메시지를 유지한다. 로그에는 중복을 포함한 발생 내역을 남긴다.
+
+```json
+[
+  {"sector":"qqq","status":"partial_failure","errors":[{"code":"UPSTREAM_TIMEOUT","message":"뉴스 수집 중 오류가 발생했습니다."}]},
+  {"sector":"xlf","status":"empty","errors":[]},
+  {"sector":"xle","status":"success","errors":[]},
+  {"sector":"xlv","status":"empty","errors":[]}
+]
+```
+
+출처(`source`)와 수집 대상 날짜(`target_date`, 미국 동부시간 기준 전날)는 상태 JSON에 포함하지 않는다.
+대신 출력 CSV 폴더 아래 `log/policy_updates_features.status.log`에 출처별 결과와 대상 날짜, 기록 시각을 JSON Lines 형식으로 누적 저장한다.
+사용자 지정 상태 경로에도 파일명의 `.json`을 `.log`로 바꾸고, 출력 CSV 폴더의 `log/` 아래에 저장한다.
+
+백엔드는 CSV와 JSON을 함께 조회하고, 프론트엔드는 해당 섹터의 `status`로 뉴스 없음과 실패를 구분한다.
+JSON은 최신 실행 상태만 보관하며 실행 날짜 및 이력은 로그에서 확인한다. 파일이 없으면 미실행/상태 미확인으로 취급한다.
+수집 시작에는 모든 섹터가 `running`이며 후처리·저장까지 완료된 후 최종 상태를 기록한다.
+공통 후처리·저장 실패는 모든 섹터에 `failed`와 해당 단계의 오류 코드를 기록한다.
+프로세스 강제 종료 시 `running`이 남을 수 있다. 동일 출력 경로에는 모니터 프로세스를 하나만 실행한다.
+CSV와 JSON은 각각 임시 파일 교체로 기록되지만 두 파일 사이의 트랜잭션은 아니다.
+
+전체 수집 실패 시 기존 CSV는 변경하지 않는다. 정상 0건에는 기존 보관 기간 정책을 적용한다.
+Yahoo 기본 수집 실패가 대체 수집으로 복구되면 최종 정상 결과를 사용하고, 대체 수집도 실패하면 오류를 보존한다.
+수집기 반환 타입(list/DataFrame)은 유지하며 `attrs["collection"]`의 출처별 진단은 내부 집계와 로그 기록에 사용한다.
+
+모니터 실행에서 저장하는 파일의 기본 경로는 다음과 같다. 공통 설정은 `crawler/monitor_paths.py`에 있다.
+
+| 파일 | 기본 경로 |
+| --- | --- |
+| 뉴스 CSV | `/opt/riseai/data/crawler/policy_updates_features.csv` |
+| 과거 뉴스 CSV | `/opt/riseai/data/crawler/old_data.csv` |
+| 상태 JSON | `/opt/riseai/data/crawler/policy_updates_features.status.json` |
+| 수집 로그 | `/opt/riseai/data/crawler/log/policy_updates_features.status.log` |
+| 섹터별 PCA 모델 | `/opt/riseai/data/crawler/features/{sector}_merged_finbert_pca.pkl` |
+| Yahoo 검증 결과 | `/opt/riseai/data/crawler/validation_monitor/cycle_*/article_*/` 아래 `summary.txt` 및 `pipeline/*.json` |
+
+Yahoo 검증은 현재 모니터에서 주석 처리되어 있으며, 재활성화하면 위 경로에 저장한다.
+요약 과정의 로그는 콘솔로만 출력하며 별도 로그 파일을 생성하지 않는다. PCA 모델은 기존 파일이 있으면 재사용한다.
+기존 파일을 자동으로 이동하지는 않는다. 배포 시 기존 PCA 모델을 재사용하려면 위 `features/` 경로에 배치한다.
+`--output-path`, `--status-path`로 명시한 경로는 계속 우선 적용되며, PCA·검증 기본 경로는 독립적이다.
+
 
 ## 프로젝트 목적
 

@@ -26,6 +26,7 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import report_failure
 from crawler.collectors.common import clean_text, create_retry_session
 from crawler.support_legacy.data_paths import collected_csv_path
 
@@ -181,6 +182,7 @@ def parse_bis_article_html(html: str, url: str) -> Optional[Dict]:
     title = clean_text(title_tag.get_text(" ", strip=True)) if title_tag else ""
 
     if not title:
+        report_failure(code="PARSE_ERROR")
         return None
 
     # 날짜 후보를 여러 군데서 찾음
@@ -242,9 +244,11 @@ def extract_article(
         )
         response.raise_for_status()
     except requests.exceptions.SSLError as e:
+        report_failure(e)
         print(f"  -> SSL 인증서 검증 실패: {e}")
         return None
     except requests.RequestException as e:
+        report_failure(e)
         print(f"  -> 상세 페이지 요청 실패: {e}")
         return None
 
@@ -291,6 +295,7 @@ def click_next(driver, wait_sec: int = 15) -> bool:
         try:
             driver.execute_script("arguments[0].click();", next_btn)
         except Exception as e:
+            report_failure(e)
             print(f"  -> 클릭 실패: {e}")
             return False
 
@@ -302,6 +307,7 @@ def click_next(driver, wait_sec: int = 15) -> bool:
         time.sleep(1)
         return True
     except TimeoutException:
+        report_failure(code="UPSTREAM_TIMEOUT")
         print("  -> 클릭은 됐지만 페이지 변화 감지 실패")
         return False
 

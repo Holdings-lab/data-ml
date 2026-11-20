@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from crawler.collectors.collection_status import report_failure
 from crawler.collectors.common import create_retry_session
 
 BASE_URL = "https://fraser.stlouisfed.org/api"
@@ -87,10 +88,13 @@ def search_fraser(session, keyword, start_date=None, per_page=100, max_results=N
 
     resp, err = _get_with_backoff(session, base, params)
     if err or not resp.ok:
+        report_failure(code="UPSTREAM_REQUEST_FAILED")
         logger.error("FRASER API 연결 실패 (%s)", err if err else resp.status_code)
         return None
 
     aggregate = resp.json()
+    if not isinstance(aggregate, dict) or "records" not in aggregate or "total" not in aggregate:
+        raise ValueError("Invalid FRASER search response")
     total = aggregate.get("total", 0)
     records = aggregate.get("records", [])
 
@@ -119,6 +123,7 @@ def search_fraser(session, keyword, start_date=None, per_page=100, max_results=N
 
         resp, err = _get_with_backoff(session, base, params)
         if err or not resp.ok:
+            report_failure(code="UPSTREAM_REQUEST_FAILED")
             logger.warning("page %d 수집 실패: %s", page, err if err else resp.status_code)
             break
 
@@ -160,7 +165,9 @@ def search_fraser(session, keyword, start_date=None, per_page=100, max_results=N
 def fetch_text_body(session, text_url, max_chars=5000):
     if not text_url or text_url == "Text 없음": return ""
     resp, err = _get_with_backoff(session, text_url)
-    if err or not resp or not resp.ok: return ""
+    if err or not resp or not resp.ok:
+        report_failure(code="UPSTREAM_REQUEST_FAILED")
+        return ""
     
     raw_text = resp.text.strip()
     

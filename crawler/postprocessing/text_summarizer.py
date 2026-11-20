@@ -42,9 +42,6 @@ CHUNK_TOKENS = 2000
 CHUNK_OVERLAP_TOKENS = 200
 SLEEP_BETWEEN_CHUNK_CALLS_SEC = 0.5
 
-BASE_DIR = Path(__file__).resolve().parent
-LOG_FILE = BASE_DIR / "ollama_calls.log"
-
 OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
 
@@ -53,11 +50,6 @@ def _log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
 
 
 def _check_ollama() -> None:

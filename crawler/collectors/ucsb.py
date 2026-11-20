@@ -20,6 +20,7 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import report_failure
 from crawler.collectors.common import normalize_whitespace, fetch_soup
 from crawler.support_legacy.data_paths import collected_csv_path
 
@@ -201,6 +202,8 @@ def parse_listing_page(soup: BeautifulSoup, doc_type: str) -> list[dict[str, str
     # 실제 문서 리스트는 view-content 컨테이너 아래에 붙는다.
     listing_container = soup.find("div", class_="view-content")
     if listing_container is None:
+        if soup.select_one(".view-empty") is None:
+            report_failure(code="INVALID_RESPONSE")
         return items
 
     for tag in listing_container.find_all(["h4", "a"]):
@@ -272,6 +275,7 @@ def crawl_listing(
         try:
             soup = fetch_page(page_url)
         except Exception as exc:
+            report_failure(exc)
             print(f"  -> failed to fetch listing page: {exc}")
             break
 
@@ -403,6 +407,7 @@ def parse_article(
     try:
         soup = fetch_page(url)
     except Exception as exc:
+        report_failure(exc)
         print(f"  -> failed to fetch article: {exc}")
         return None
 

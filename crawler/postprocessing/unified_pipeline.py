@@ -20,6 +20,7 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
+from crawler.monitor_paths import FEATURES_DIR
 from crawler.postprocessing.text_summarizer import summarize_to_under_limit as ollama_summarize
 from crawler.postprocessing.sentiment_score import analyze_titles, analyze_bodies
 from crawler.postprocessing.sentence_transformer import encode_summaries
@@ -40,8 +41,8 @@ def _sector_pca_model_path(sector: str | None) -> str:
     """섹터별 PCA 모델 경로를 반환한다."""
     sector_key = str(sector or "").strip().lower()
     if not sector_key:
-        return feature_csv_path("policy_updates_pca.pkl")
-    return feature_csv_path(f"{sector_key}_merged_finbert_pca.pkl")
+        return str(FEATURES_DIR / "policy_updates_pca.pkl")
+    return str(FEATURES_DIR / f"{sector_key}_merged_finbert_pca.pkl")
 
 
 def _resolve_pca_components(embeddings: object, requested_components: int = PCA_DIM) -> int:
@@ -283,6 +284,7 @@ def apply_embeddings(df: pd.DataFrame) -> pd.DataFrame:
         reduced_embeddings = _reduce_embeddings(embeddings, pca_model)
 
         if not is_loaded:
+            Path(pca_path).parent.mkdir(parents=True, exist_ok=True)
             joblib.dump(pca_model, pca_path)
             print(f"[UNIFIED] PCA: saved new model to {pca_path}")
 

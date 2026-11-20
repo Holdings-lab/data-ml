@@ -233,8 +233,8 @@ def make_training_config(
     ticker        : 예측 대상 티커 (예: "XLE", "QQQ")
     news_input_path : 해당 티커의 뉴스 임베딩 CSV 경로.
                     None이면 data/crawler/features/{ticker}/ 아래의
-                    merged_finbert_with_embeddings.csv를 우선 사용하고,
-                    없으면 예전 flat 파일명으로 fallback한다.
+                    merged_finbert_with_embeddings.csv를 사용한다.
+                    다른 위치의 파일은 명시적으로 지정한다.
     **overrides   : MarketNewsTrainingConfig 필드 직접 덮어쓰기
                     (예: macro_tickers=(...), optuna_trials=300)
     """
@@ -246,24 +246,10 @@ def make_training_config(
     ).as_config_overrides()
 
     if news_input_path is None:
-        nested_news_input_path = _crawler_data_path_no_create(
+        resolved_news_input_path = _crawler_data_path_no_create(
             "features",
             t,
             "merged_finbert_with_embeddings.csv",
-        )
-        legacy_news_filename = (
-            "merged_finbert_with_embeddings.csv"
-            if t == "qqq"
-            else f"{t}_merged_finbert_with_embeddings.csv"
-        )
-        legacy_news_input_path = _crawler_data_path_no_create(
-            "features",
-            legacy_news_filename,
-        )
-        resolved_news_input_path = (
-            nested_news_input_path
-            if nested_news_input_path.exists()
-            else legacy_news_input_path
         )
     else:
         resolved_news_input_path = Path(news_input_path)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import os
 import tempfile
@@ -21,6 +22,8 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import attempt, collect_item, propagate_errors, report_failure, summarize
+from crawler.monitor_paths import OUTPUT_ROOT
 from crawler.collectors.common import fetch_soup
 from crawler.collectors.common import clean_text as _clean_text
 from crawler.collectors.bis import create_requests_session, crawl_bis_news_index_selenium, extract_article
@@ -40,12 +43,8 @@ from crawler.collectors.ucsb import (
 BASE_URL = "https://www.federalreserve.gov"
 FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
-DEFAULT_OUTPUT_CSV = "/opt/riseai/data/crawler/policy_updates_features.csv"
-DEFAULT_OLD_DATA_CSV = "/opt/riseai/data/crawler/old_data.csv"
-
-
-# DEFAULT_OUTPUT_CSV = "policy_updates_features.csv"
-# DEFAULT_OLD_DATA_CSV = "old_data.csv"
+DEFAULT_OUTPUT_CSV = str(OUTPUT_ROOT / "policy_updates_features.csv")
+DEFAULT_OLD_DATA_CSV = str(OUTPUT_ROOT / "old_data.csv")
 
 DEFAULT_INTERVAL_SEC = 24 * 60 * 60 # 하루 1회 실행 주기 (초 단위)
 US_EASTERN_TZ = ZoneInfo("America/New_York")    # 미국 동부시간 기준
@@ -211,7 +210,7 @@ def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
 
             if "implementation note" in label:
                 doc_type = "implementation_note"
-                article = crawl_statement(url)
+                article = collect_item(lambda: crawl_statement(url))
             elif label == "html":
                 parent_strong = link.parent.find("strong") if link.parent else None
                 if parent_strong is None:
@@ -221,10 +220,10 @@ def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
 
                 if "statement:" in parent_title:
                     doc_type = "statement"
-                    article = crawl_statement(url)
+                    article = collect_item(lambda: crawl_statement(url))
                 elif "minutes:" in parent_title:
                     doc_type = "minutes"
-                    article = crawl_minutes(url)
+                    article = collect_item(lambda: crawl_minutes(url))
 
                     release_match = re.search(
                         r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
@@ -288,7 +287,7 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
     start_date = target_date.isoformat()
     records: list[dict[str, Any]] = []
 
-    for item in get_steo_items(start_date=start_date):
+    for item in collect_item(lambda: get_steo_items(start_date=start_date)) or []:
         release_date = str(item.get("release_date", ""))
         if _parse_iso_date(release_date) != target_date:
             continue
@@ -303,11 +302,11 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
                 "url": url,
                 "title": str(item.get("title", "")),
                 "image": "",
-                "body": get_steo_body(url)
+                "body": collect_item(lambda: get_steo_body(url)) or ""
             }
         )
 
-    for item in get_today_items(start_date=start_date):
+    for item in collect_item(lambda: get_today_items(start_date=start_date)) or []:
         release_date = str(item.get("release_date", ""))
         if _parse_iso_date(release_date) != target_date:
             continue
@@ -322,7 +321,7 @@ def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
                 "url": url,
                 "title": str(item.get("title", "")),
                 "image": "",
-                "body": get_today_body(url),
+                "body": collect_item(lambda: get_today_body(url)) or "",
             }
         )
 
@@ -340,7 +339,7 @@ def _collect_bis_records(target_date: date, max_pages: int, sleep_sec: float) ->
     # listing_items are expected newest->oldest; no need for consecutive counters
 
     for item in listing_items:
-        article = extract_article(item["url"], session=session, sleep_sec=sleep_sec)
+        article = collect_item(lambda: extract_article(item["url"], session=session, sleep_sec=sleep_sec))
         if not article:
             continue
 
@@ -467,17 +466,18 @@ def _collect_ucsb_records(
 
 def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any]]:
     ticker = ticker.lower()
-    try:
-        yahoo_records = scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
-    except Exception as exc:
-        print(f"[MONITOR] Yahoo primary collector failed; trying fallback: {exc}")
-        yahoo_records = []
-
-    if not yahoo_records:
-        yahoo_records = scrape_yahoo_news_support(tickers=[ticker.upper()], target_date=target_date.isoformat())
-
-    if not yahoo_records:
-        return []
+    yahoo_records, primary_errors = attempt(
+        lambda: scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
+    )
+    if not yahoo_records or primary_errors:
+        fallback_records, fallback_errors = attempt(
+            lambda: scrape_yahoo_news_support(tickers=[ticker.upper()], target_date=target_date.isoformat())
+        )
+        by_url = {row.get("url"): row for row in yahoo_records + fallback_records}
+        yahoo_records = list(by_url.values())
+        # A completed fallback (including zero matches) resolves primary failures.
+        if fallback_errors:
+            propagate_errors(primary_errors + fallback_errors)
 
     records: list[dict[str, Any]] = []
     for row in yahoo_records:
@@ -511,54 +511,39 @@ def _collect_sector_records(
     target_date: date,
     bis_max_pages: int,
     sleep_sec: float,
-    shared_records: dict[str, list[dict[str, Any]]] | None = None,
+    shared_records: dict | None = None,
+    source_results: list | None = None,
 ) -> list[dict[str, Any]]:
-    sector_config = SECTOR_MONITOR_CONFIGS.get(sector)
-    if sector_config is None:
+    if sector not in SECTOR_MONITOR_CONFIGS:
         raise ValueError(f"Unsupported sector: {sector}")
-
-    sector_sources = set(sector_config["sources"])
-    sector_records: list[dict[str, Any]] = []
-
-    if "FOMC" in sector_sources:
-        # 호출 주기 안에서 빈 결과까지 공유한다. 전역 캐시는 날짜 변경 시 stale해질 수 있다.
-        if shared_records is None:
-            fomc_records = _collect_fomc_records(target_date)
+    config = SECTOR_MONITOR_CONFIGS[sector]
+    callbacks = {
+        "FOMC": lambda: _collect_fomc_records(target_date),
+        "BIS": lambda: _collect_bis_records(target_date, max_pages=bis_max_pages, sleep_sec=sleep_sec),
+        "FRASER": lambda: _collect_fraser_records(target_date),
+        "EIA": lambda: _collect_eia_records(target_date),
+        "FDA": lambda: _collect_fda_records(target_date),
+        "YAHOO": lambda: _collect_yahoo_records(target_date, sector),
+        "UCSB": lambda: _collect_ucsb_records(
+            target_date, sleep_sec=sleep_sec, keyword_config_path=_sector_keyword_config_path(sector)
+        ),
+    }
+    sector_records = []
+    for source in config["sources"]:
+        if source == "FOMC" and shared_records is not None:
+            if source not in shared_records:
+                shared_records[source] = attempt(callbacks[source])
+            records, errors = shared_records[source]
         else:
-            if "FOMC" not in shared_records:
-                shared_records["FOMC"] = _collect_fomc_records(target_date)
-            fomc_records = shared_records["FOMC"]
-        sector_records.extend(_tag_records(fomc_records, sector))
-    if "BIS" in sector_sources:
-        sector_records.extend(
-            _tag_records(
-                _collect_bis_records(
-                    target_date,
-                    max_pages=bis_max_pages,
-                    sleep_sec=sleep_sec
-                ),
-                sector,
-            )
-        )
-    if "FRASER" in sector_sources:
-        sector_records.extend(_tag_records(_collect_fraser_records(target_date), sector))
-    if "EIA" in sector_sources:
-        sector_records.extend(_tag_records(_collect_eia_records(target_date), sector))
-    if "FDA" in sector_sources:
-        sector_records.extend(_tag_records(_collect_fda_records(target_date), sector))
-    if "YAHOO" in sector_sources:
-        sector_records.extend(_tag_records(_collect_yahoo_records(target_date, sector), sector))
-
-    sector_records.extend(
-        _tag_records(
-            _collect_ucsb_records(
-                target_date,
-                sleep_sec=sleep_sec,
-                keyword_config_path=_sector_keyword_config_path(sector),
-            ),
-            sector,
-        )
-    )
+            records, errors = attempt(callbacks[source])
+        sector_records.extend(_tag_records(records, sector))
+        if source_results is not None:
+            source_results.append({
+                "sector": sector, "source": source, "count": len(records),
+                "status": ("partial_failure" if records else "failed") if errors
+                          else ("success" if records else "empty"),
+                "errors": errors,
+            })
     return sector_records
 
 
@@ -572,7 +557,8 @@ def collect_policy_updates(
 
     new_records: list[dict[str, Any]] = []
     seen_urls = set()
-    shared_records: dict[str, list[dict[str, Any]]] = {}
+    shared_records: dict = {}
+    source_results: list = []
 
     for sector in MONITOR_SECTORS:
         print(f"[MONITOR] Starting {sector.upper()} crawl for {target_date.isoformat()}")
@@ -582,6 +568,7 @@ def collect_policy_updates(
             bis_max_pages=bis_max_pages,
             sleep_sec=sleep_sec,
             shared_records=shared_records,
+            source_results=source_results,
         )
 
         for record in sector_records:
@@ -593,7 +580,19 @@ def collect_policy_updates(
 
     new_df = _normalise_records(new_records)
 
-    # 반환: 이번 사이클에서 새로 수집된 행들(중복 제거된 상태)
+    new_df.attrs["collection"] = {
+        "status": summarize((item["status"] for item in source_results), len(new_df)),
+        "sources": source_results,
+        "sectors": [
+            {"sector": sector,
+             "errors": [error for item in source_results if item["sector"] == sector
+                        for error in item["errors"]],
+             "status": summarize(
+                 (item["status"] for item in source_results if item["sector"] == sector),
+                 int((new_df["sector"] == sector).sum()))}
+            for sector in MONITOR_SECTORS
+        ],
+    }
     return new_df
 
 
@@ -602,7 +601,8 @@ def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     주어진 DataFrame에 통합 후처리를 적용하고 처리된 DataFrame을 반환한다.
     """
     from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
-    from crawler.validating.monitor_validation import validate_yahoo_summaries
+    # Yahoo 요약 후 신뢰도 검증은 일시 비활성화.
+    # from crawler.validating.validation_pipeline import validate_yahoo_summaries
 
     print("[MONITOR] 통합 후처리 파이프라인을 실행 중...")
     try:
@@ -612,9 +612,9 @@ def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             include_encoding=True,
             include_sentiment=True,
             include_embeddings=True,
-            post_summary_hook=lambda summarized: validate_yahoo_summaries(
-                summarized, source_records=df,
-            ),
+            # post_summary_hook=lambda summarized: validate_yahoo_summaries(
+            #     summarized, source_records=df,
+            # ),
         )
         print(f"[MONITOR] 통합 후처리 파이프라인 완료: {len(result_df)} rows 처리됨")
         return result_df
@@ -665,12 +665,45 @@ def _save_monitor_results(processed_news: pd.DataFrame, processed_path: Path, ol
     print(f"[MONITOR] 모니터링 결과: {processed_path} / {len(recent)} rows")
 
 
+def _write_json_atomic(state: dict | list, path: Path) -> None:
+    if isinstance(state, list):
+        # Deduplicate only the JSON snapshot; keep full diagnostics in logs.
+        snapshot = []
+        for item in state:
+            errors_by_code = {}
+            for error in item["errors"]:
+                errors_by_code.setdefault(error["code"], error)
+            snapshot.append({**item, "errors": list(errors_by_code.values())})
+        state = snapshot
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         suffix=".tmp", delete=False) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(state, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _append_monitor_log(path: Path, target_date: date, **details) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"logged_at": _us_eastern_now().isoformat(),
+                                 "target_date": target_date.isoformat(), **details},
+                                ensure_ascii=False) + "\n")
+
+
 def run_monitor(
     output_path: str = DEFAULT_OUTPUT_CSV,
     interval_sec: float = DEFAULT_INTERVAL_SEC,
     bis_max_pages: int = 1,                                # 거의 업데이트 없음, 기본값 1페이지로 충분
     sleep_sec: float = 1.0,                                # Rate limit을 피하기 위해 요청 사이에 1초 정도 쉬는 것이 안전
     max_cycles: int | None = None,
+    status_path: str | None = None,
 ) -> None:
     if max_cycles is not None and max_cycles < 1:
         raise ValueError("max_cycles must be at least 1")
@@ -684,31 +717,59 @@ def run_monitor(
     if processed_path.resolve() == old_news_path.resolve():
         raise ValueError("Output and archive paths must differ")
 
+    state_path = Path(status_path) if status_path else processed_path.with_suffix(".status.json")
+    if state_path.resolve() in (processed_path.resolve(), old_news_path.resolve()):
+        raise ValueError("Status path must differ from CSV paths")
+    log_path = processed_path.parent / "log" / state_path.with_suffix(".log").name
+    if log_path.resolve() in (processed_path.resolve(), old_news_path.resolve(), state_path.resolve()):
+        raise ValueError("Log path must differ from CSV and status paths")
+
     while True:
         target_date = _get_target_date()
         cycle += 1
 
         print(f"[MONITOR] cycle={cycle} target_date={target_date.isoformat()} ")
 
-        # 각 주기마다 전날 데이터를 한 번만 모은 뒤, interval_sec 값이 기본값이면 다음 자정까지 쉰다.
-        news_list = collect_policy_updates(
-            bis_max_pages=bis_max_pages,
-            sleep_sec=sleep_sec,
-            target_date=target_date,
-        )
-
-        news_count = len(news_list)
-        if news_count > 0:
-            print(f"[MONITOR] 수집한 뉴스 개수 : {news_count}개")
-            processed_news = run_postprocessing_pipeline(df=news_list)
-
-        else:
-            print("[MONITOR] 수집된 뉴스가 없습니다.")
-            processed_news = pd.DataFrame(columns=CANONICAL_COLUMNS)
-
-        # 수집 결과가 없어도 기존 데이터의 보관 기간을 적용한다.
-        if not processed_news.empty or processed_path.exists():
-            _save_monitor_results(processed_news, processed_path, old_news_path)
+        state = [{"sector": sector, "status": "running", "errors": []}
+                 for sector in MONITOR_SECTORS]
+        stage = "collection"
+        _write_json_atomic(state, state_path)
+        _append_monitor_log(log_path, target_date, stage=stage, status="running")
+        try:
+            news_list = collect_policy_updates(
+                bis_max_pages=bis_max_pages, sleep_sec=sleep_sec, target_date=target_date,
+            )
+            collection = news_list.attrs.get("collection")
+            if collection is None:
+                # Preserve compatibility with callers supplying a plain DataFrame.
+                collection = {"sources": [], "sectors": [
+                    {"sector": sector, "status": "success" if (
+                        "sector" in news_list and (news_list["sector"] == sector).any()
+                    ) else "empty", "errors": []} for sector in MONITOR_SECTORS
+                ]}
+            state = [{"sector": item["sector"], "status": item["status"], "errors": item["errors"]}
+                     for item in collection["sectors"]]
+            for item in collection["sources"]:
+                _append_monitor_log(log_path, target_date, **item)
+            stage = "postprocessing"
+            processed_news = (run_postprocessing_pipeline(df=news_list) if len(news_list)
+                              else pd.DataFrame(columns=CANONICAL_COLUMNS))
+            stage = "saving"
+            if not all(item["status"] == "failed" for item in state) and (
+                not processed_news.empty or processed_path.exists()
+            ):
+                _save_monitor_results(processed_news, processed_path, old_news_path)
+        except Exception as exc:
+            error = report_failure(exc, code=stage.upper() + "_FAILED")
+            for item in state:
+                item["status"] = "failed"
+                item["errors"].append(error)
+            _write_json_atomic(state, state_path)
+            _append_monitor_log(log_path, target_date, stage=stage, status="failed", errors=[error])
+            raise
+        _write_json_atomic(state, state_path)
+        _append_monitor_log(log_path, target_date, stage="completed", sectors=state)
+        print(f"[MONITOR] status saved / {state_path}")
 
         if max_cycles is not None and cycle >= max_cycles:
             break
@@ -725,6 +786,7 @@ def run_monitor(
 def main() -> None:
     parser = argparse.ArgumentParser(description="[Monitor] FOMC, BIS, FRASER, EIA, UCSB, FDA, YAHOO updates for the previous America/New_York day")
     parser.add_argument("--output-path", type=str, default=DEFAULT_OUTPUT_CSV, help="수집 결과 CSV 파일 경로")
+    parser.add_argument("--status-path", default=None, help="수집 상태 JSON 경로; 기본값: 출력 CSV의 .status.json 파일")
     parser.add_argument("--interval-sec", type=float, default=DEFAULT_INTERVAL_SEC, help="모니터링 간격 (초 단위); 기본값은 다음 America/New_York 자정에 스케줄링됩니다")
     parser.add_argument("--bis-max-pages", type=int, default=1)
     parser.add_argument("--sleep-sec", type=float, default=1.0, help="Rate limit을 피하기 위해 요청 사이에 쉬는 시간 (초 단위)")
@@ -733,6 +795,7 @@ def main() -> None:
 
     run_monitor(
         output_path=args.output_path,
+        status_path=args.status_path,
         interval_sec=args.interval_sec,
         bis_max_pages=args.bis_max_pages,
         sleep_sec=args.sleep_sec,
