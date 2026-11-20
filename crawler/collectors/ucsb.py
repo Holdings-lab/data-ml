@@ -20,6 +20,8 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import report_failure
+from crawler.collectors.common import normalize_whitespace, fetch_soup
 from crawler.support_legacy.data_paths import collected_csv_path
 
 BASE_URL = "https://www.presidency.ucsb.edu"
@@ -71,7 +73,7 @@ def clean_text(text: str) -> str:
     """
     연속 공백과 줄바꿈을 하나의 공백으로 정리한 뒤 양끝 공백을 제거한다.
     """
-    return re.sub(r"\s+", " ", text).strip()
+    return normalize_whitespace(text)
 
 
 def parse_published_date(raw_value: str) -> str:
@@ -120,7 +122,7 @@ def normalize_keyword_dictionary(
         if not isinstance(raw_keywords, Sequence):
             raise ValueError(f"Keyword group '{group_name}' must contain a keyword list.")
 
-        keywords = [keyword for keyword in raw_keywords]
+        keywords = list(raw_keywords)
         if group and keywords:
             normalized[group] = {
                 "weight": weight,
@@ -160,9 +162,7 @@ def fetch_page(url: str) -> BeautifulSoup:
 
     네트워크 오류나 HTTP 오류는 호출한 쪽에서 처리할 수 있도록 그대로 올린다.
     """
-    response = requests.get(url, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-    return BeautifulSoup(response.text, "html.parser")
+    return fetch_soup(url, headers=HEADERS, timeout=30, client=requests)
 
 
 def build_listing_url(base_url: str, page_number: int) -> str:
@@ -202,6 +202,8 @@ def parse_listing_page(soup: BeautifulSoup, doc_type: str) -> list[dict[str, str
     # 실제 문서 리스트는 view-content 컨테이너 아래에 붙는다.
     listing_container = soup.find("div", class_="view-content")
     if listing_container is None:
+        if soup.select_one(".view-empty") is None:
+            report_failure(code="INVALID_RESPONSE")
         return items
 
     for tag in listing_container.find_all(["h4", "a"]):
@@ -273,6 +275,7 @@ def crawl_listing(
         try:
             soup = fetch_page(page_url)
         except Exception as exc:
+            report_failure(exc)
             print(f"  -> failed to fetch listing page: {exc}")
             break
 
@@ -404,6 +407,7 @@ def parse_article(
     try:
         soup = fetch_page(url)
     except Exception as exc:
+        report_failure(exc)
         print(f"  -> failed to fetch article: {exc}")
         return None
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import re
 from pathlib import Path
 from urllib.parse import urljoin
@@ -11,6 +12,13 @@ import requests
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from crawler.collectors.collection_status import report_failure
+from crawler.collectors.common import fetch_soup
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +65,8 @@ def _fetch_dynamic_soup(url: str) -> BeautifulSoup | None:
             browser.close()
             return BeautifulSoup(html, "html.parser")
             
-    except Exception:
+    except Exception as exc:
+        report_failure(exc)
         # 실패 시 페이지 구조 후보를 더 확인할 수 있도록 상세 예외를 남깁니다.
         logger.exception("STEO: Playwright 렌더링 중 오류 발생")
         return None
@@ -83,6 +92,7 @@ def get_steo_items(start_date: str = DEFAULT_START_DATE) -> list[dict]:
 
     results_table = soup.find("div", id="reports-holder")
     if not results_table:
+        report_failure(code="INVALID_RESPONSE")
         candidate_ids = [tag.get("id") for tag in soup.find_all(attrs={"id": True}) if tag.get("id") and "report" in tag.get("id")]
         logger.info("STEO: no reports-holder container found; candidate ids=%s", candidate_ids)
         return contents
@@ -156,6 +166,7 @@ def get_today_items(start_date: str = DEFAULT_START_DATE):
 
     results_table = soup.find("div", class_="accordion")
     if not results_table:
+        report_failure(code="INVALID_RESPONSE")
         logger.info("TODAY IN ENERGY: no accordion container found")
         return contents
 
@@ -194,10 +205,9 @@ def get_today_body(url):
 def _fetch_soup(url: str) -> BeautifulSoup | None:
     """공통: URL을 요청하고 BeautifulSoup 객체를 반환합니다. 실패 시 None을 반환합니다."""
     try:
-        response = requests.get(url, headers=headers, timeout=(5, 30))
-        response.raise_for_status()
-        return BeautifulSoup(response.text, "html.parser")
+        return fetch_soup(url, headers=headers, timeout=(5, 30), client=requests)
     except requests.RequestException as exc:
+        report_failure(exc)
         logger.exception("Request failed for %s: %s", url, exc)
         return None
 
@@ -213,6 +223,8 @@ def _get_article_body(url: str) -> str:
 
     body_tag = soup.find("div", class_="tie-article")
     body = body_tag.get_text(" ", strip=True) if body_tag else ""
+    if not body:
+        report_failure(code="PARSE_ERROR")
     return body
 
 

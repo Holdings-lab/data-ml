@@ -23,8 +23,8 @@ if PROJECT_ROOT_STR not in sys.path:
 
 from crawler.support_legacy.data_paths import collected_csv_path, summarized_csv_path
 
-INPUT_CSV = collected_csv_path("xlv_presidential_documents.csv")                         # 입력 CSV 경로
-OUTPUT_CSV = summarized_csv_path("xlv_presidential_documents_summarized.csv")            # 출력 CSV 경로
+INPUT_CSV = collected_csv_path("yahoo_market_news_2026-10-09.csv")                         # 입력 CSV 경로
+OUTPUT_CSV = summarized_csv_path("yh_summarize_2026-10-09.csv")            # 출력 CSV 경로
 
 BODY_COL = "body"
 SUMMARY_COL = "body_summary"
@@ -42,9 +42,6 @@ CHUNK_TOKENS = 2000
 CHUNK_OVERLAP_TOKENS = 200
 SLEEP_BETWEEN_CHUNK_CALLS_SEC = 0.5
 
-BASE_DIR = Path(__file__).resolve().parent
-LOG_FILE = BASE_DIR / "ollama_calls.log"
-
 OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
 
@@ -53,11 +50,6 @@ def _log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
 
 
 def _check_ollama() -> None:

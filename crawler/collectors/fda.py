@@ -1,6 +1,5 @@
 import time
 import sys
-import csv
 import random
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -15,6 +14,8 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import report_failure
+from crawler.collectors.common import write_csv_records
 from crawler.support_legacy.data_paths import collected_csv_path
 
 
@@ -51,15 +52,13 @@ def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"fda_{target_date}.csv"))
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
-    with csv_path.open(
-        "a" if file_exists else "w",
+    write_csv_records(
+        csv_path, records,
+        ["release_date", "category", "doc_type", "url", "title", "body"],
+        mode="a" if file_exists else "w",
         encoding="utf-8" if file_exists else "utf-8-sig",
-        newline="",
-    ) as f:
-        writer = csv.DictWriter(f, fieldnames=["release_date", "category", "doc_type", "url", "title", "body"])
-        if not file_exists:
-            writer.writeheader()
-        writer.writerows(records)
+        write_header=not file_exists,
+    )
 
     return csv_path
 
@@ -104,6 +103,7 @@ def get_detail_content(url):
         }
 
     except Exception as e:
+        report_failure(e)
         print(f"[Error fetching detail] {url}: {e}")
         return None
 
@@ -127,6 +127,8 @@ def crawl_fda_press_releases_24(target_date=None):
 
             # 기사 링크 태그 추출
             article_list = soup.find("div", class_="view-content")
+            if article_list is None and soup.select_one(".view-empty") is None:
+                report_failure(code="INVALID_RESPONSE")
             articles = article_list.find_all("a") if article_list else []
 
             if not articles:
@@ -175,6 +177,7 @@ def crawl_fda_press_releases_24(target_date=None):
                 break
 
         except Exception as e:
+            report_failure(e)
             print(f"[Error fetching list page] {target_url}: {e}")
             break
 

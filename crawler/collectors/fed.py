@@ -6,7 +6,6 @@ from urllib.parse import urljoin
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
@@ -14,10 +13,11 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.common import fetch_soup
 from crawler.support_legacy.data_paths import collected_csv_path
 
 BASE_URL = "https://www.federalreserve.gov"
-CALENDAR_URL ="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
@@ -32,15 +32,13 @@ HISTORICAL_CALENDAR_URLS = {
 }
 
 
-def crawl_implementation_note(url: str) -> dict:
+
+def crawl_statement(url: str) -> dict:
     """
     Implementation Note 상세 페이지에서
     공개일, 제목, 본문 텍스트를 추출한다.
     """
-    response = requests.get(url, headers=HEADERS, timeout=20)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = fetch_soup(url, headers=HEADERS, timeout=20, client=requests)
 
     # 페이지 상단에 노출된 공식 게시 날짜를 읽는다.
     date_tag = soup.find("p", class_="article__time")
@@ -55,60 +53,14 @@ def crawl_implementation_note(url: str) -> dict:
     divs = soup.find_all("div", class_="col-xs-12")
 
     article = None
-    for div in divs:
-        classes = div.get("class", [])
-        if "heading" not in classes:
-            article = div
-            break
+    if len(divs) > 1:
+        article = divs[1]
+
+        if not article.find("p") and len(divs) > 2:
+            article = divs[2]
 
     contents = []
 
-    if article:
-        # 컨테이너 전체를 한 번에 텍스트로 뽑아 라인 단위로 처리한다.
-        raw = article.get_text("\n", strip=True)
-        for line in (ln.strip() for ln in raw.splitlines()):
-            if not line:
-                continue
-            contents.append(line)
-
-    body_text = " ".join(contents)
-
-    return {
-        "release_date": release_date,
-        "title": title,
-        "body": body_text
-    }
-
-
-def crawl_fomc_statement(url: str) -> dict:
-    """
-    FOMC statement 상세 페이지에서
-    공개일, 제목, 본문 텍스트를 추출한다.
-    """
-    response = requests.get(url, headers=HEADERS, timeout=20)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # 페이지 상단 게시 날짜
-    date_tag = soup.find("p", class_="article__time")
-    release_date = date_tag.get_text(" ", strip=True) if date_tag else ""
-
-    # statement 제목
-    title_tag = soup.find("h3")
-    title = title_tag.get_text(" ", strip=True) if title_tag else ""
-
-    # statement 본문은 보통 col-sm-8 폭의 본문 영역에 들어 있다.
-    divs = soup.find_all("div", class_="col-sm-8")
-
-    article = None
-    for div in divs:
-        classes = div.get("class", [])
-        if "heading" not in classes:
-            article = div
-            break
-
-    contents = []
     stop_texts = ("for media inquiries", "implementation note issued")
 
     if article:
@@ -141,10 +93,7 @@ def crawl_minutes(url: str) -> dict:
     release_date는 상세 페이지가 아니라 캘린더 페이지의
     '(Released ...)' 문구에서 따로 채운다.
     """
-    response = requests.get(url, headers=HEADERS, timeout=20)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = fetch_soup(url, headers=HEADERS, timeout=20, client=requests)
 
     # minutes 전체 본문이 들어 있는 컨테이너
     article = soup.find("div", id="article")
@@ -157,12 +106,22 @@ def crawl_minutes(url: str) -> dict:
 
     if article:
         # 전체 텍스트를 라인 단위로 읽어 숫자 줄 제거, 'notation vote' 이전까지만 수집한다.
-        raw = article.get_text("\n", strip=True)
-        for line in (ln.strip() for ln in raw.splitlines()):
-            if not line:
+        skip = False
+        plist = article.find_all("p")
+        for p in plist:
+            strong_tag = p.find("strong")
+            if strong_tag:
+                strong_text = strong_tag.get_text(" ", strip=True).lower()
+                if "notation vote" in strong_text or "attendance" in strong_text:
+                    skip = True
+                else:
+                    skip = False
+
+            if skip:
                 continue
 
-            contents.append(line)
+            ptext = p.get_text(" ", strip=True)
+            contents.append(ptext)
 
     body_text = " ".join(contents)
 
@@ -177,20 +136,14 @@ def crawl_latest_calendar(calendar_url: str = CALENDAR_URL) -> list:
     """최신 형식의 FOMC 캘린더를 크롤링해 레코드 리스트를 반환한다."""
     results = []
     try:
-        response = requests.get(calendar_url, headers=HEADERS, timeout=20)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = fetch_soup(calendar_url, headers=HEADERS, timeout=20, client=requests)
 
+        # 연도별 섹션
         sections = soup.find_all("div", class_="panel-default")
 
         for section in sections:
             heading = section.find("h4")
             if heading is None:
-                continue
-
-            heading_text = heading.get_text(" ", strip=True)
-            match = re.match(r"(\d{4}) FOMC Meetings", heading_text)
-            if not match:
                 continue
 
             meetings = section.find_all("div", class_="fomc-meeting")
@@ -206,25 +159,24 @@ def crawl_latest_calendar(calendar_url: str = CALENDAR_URL) -> list:
                     if "implementation note" in label:
                         doc_type = "implementation_note"
                         try:
-                            article = crawl_implementation_note(url)
+                            article = crawl_statement(url)
                         except Exception:
                             continue
-
                     elif label == "html":
-                        parent_strong = link.parent.find("strong") if link.parent else None
-                        if parent_strong is None:
+                        parent_strong = link.parent.find("strong")
+                        if not parent_strong:
                             continue
 
-                        parent_title = parent_strong.get_text(" ", strip=True).lower()
+                        parent_text = parent_strong.get_text(" ", strip=True).lower()
 
-                        if "statement:" in parent_title:
+                        if "statement:" in parent_text:
                             doc_type = "statement"
                             try:
-                                article = crawl_fomc_statement(url)
+                                article = crawl_statement(url)
                             except Exception:
                                 continue
 
-                        elif "minutes:" in parent_title:
+                        elif "minutes:" in parent_text:
                             doc_type = "minutes"
                             try:
                                 article = crawl_minutes(url)
@@ -235,8 +187,15 @@ def crawl_latest_calendar(calendar_url: str = CALENDAR_URL) -> list:
                                 r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
                                 link.parent.get_text(" ", strip=True)
                             )
-                            release_date = release_match.group(1) if release_match else None
+
+                            if not release_match:
+                                continue
+
+                            release_date = release_match.group(1)
                             article["release_date"] = release_date
+
+                        else:
+                            continue
 
                     if doc_type and article:
                         results.append({
@@ -251,7 +210,7 @@ def crawl_latest_calendar(calendar_url: str = CALENDAR_URL) -> list:
                     time.sleep(0.5)
 
     except Exception as e:
-        print(f"[WARN] Latest calendar crawl failed: {e}")
+        print(f"[FOMC] 크롤링 중 오류 발생: {e}")
 
     return results
 
@@ -261,14 +220,12 @@ def crawl_historical_calendars(historical_urls: dict = HISTORICAL_CALENDAR_URLS)
     results = []
 
     for year, calendar_url in sorted(historical_urls.items()):
-        print(f"\n[{year}] 크롤링 시작: {calendar_url}")
+        print(f"[FOMC] {year}년도 크롤링 시작: {calendar_url}")
         try:
-            response = requests.get(calendar_url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            soup = fetch_soup(calendar_url, headers=HEADERS, timeout=20, client=requests)
 
             meetings = soup.find_all("div", class_="panel-padded")
-            year_count = 0
+            news_count = 0
 
             for meeting in meetings:
                 for link in meeting.find_all("a", href=True):
@@ -281,14 +238,13 @@ def crawl_historical_calendars(historical_urls: dict = HISTORICAL_CALENDAR_URLS)
                     if label == "statement":
                         doc_type = "statement"
                         try:
-                            article = crawl_fomc_statement(url)
+                            article = crawl_statement(url)
                         except Exception as e:
-                            print(f"  [WARN] Statement 파싱 실패 ({url}): {e}")
                             continue
 
                     elif label == "html":
-                        parent_title = link.parent.get_text(" ", strip=True) if link.parent else None
-                        if not parent_title or not parent_title.startswith("Minutes"):
+                        parent_text = link.parent.get_text(" ", strip=True) if link.parent else ""
+                        if not parent_text.startswith("Minutes"):
                             continue
 
                         doc_type = "minutes"
@@ -298,11 +254,17 @@ def crawl_historical_calendars(historical_urls: dict = HISTORICAL_CALENDAR_URLS)
                                 r"Released ([A-Za-z]+ \d{1,2}, \d{4})",
                                 link.parent.get_text(" ", strip=True)
                             )
-                            release_date = release_match.group(1) if release_match else None
+
+                            if not release_match:
+                                continue
+
+                            release_date = release_match.group(1)
                             article["release_date"] = release_date
                         except Exception as e:
-                            print(f"  [WARN] Minutes 파싱 실패 ({url}): {e}")
                             continue
+
+                    else:
+                        continue
 
                     if doc_type and article:
                         results.append({
@@ -313,14 +275,14 @@ def crawl_historical_calendars(historical_urls: dict = HISTORICAL_CALENDAR_URLS)
                             "title": article["title"],
                             "body": article["body"]
                         })
-                        year_count += 1
+                        news_count += 1
 
                     time.sleep(0.5)
 
-            print(f"[{year}] 크롤링 완료: {year_count}건 수집")
+            print(f"[FOMC] {year}년도 크롤링 완료: {news_count}건 수집")
 
         except Exception as e:
-            print(f"[{year}] 크롤링 실패: {e}")
+            print(f"[FOMC] {year}년도 크롤링 실패: {e}")
             continue
 
     return results
@@ -341,8 +303,9 @@ def main() -> None:
     new_df = pd.DataFrame(results)
     print(f"\n새로 수집된 데이터: {len(new_df)}건")
 
-    # 기존 fed_fomc_links.csv가 있으면 읽어서 병합한다.
-    existing_csv = collected_csv_path("fed_fomc_links.csv")
+
+    # 기존 fed_fomc_links2.csv가 있으면 읽어서 병합한다.
+    existing_csv = collected_csv_path("fed_fomc_links2.csv")
     existing_path = Path(existing_csv)
 
     if existing_path.exists():
@@ -364,8 +327,9 @@ def main() -> None:
     merged_df = merged_df.sort_values(by='_sort_date', ascending=False, na_position='last').reset_index(drop=True)
     merged_df = merged_df.drop(columns=['_sort_date'])
 
-    # 최종 결과를 fed_fomc_links.csv에 저장한다.
-    output_csv = collected_csv_path("fed_fomc_links.csv")
+
+    # 최종 결과를 fed_fomc_links2.csv에 저장한다.
+    output_csv = collected_csv_path("fed_fomc_links2.csv")
     merged_df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"\n저장 완료: {output_csv}")
 

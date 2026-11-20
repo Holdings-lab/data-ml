@@ -1,6 +1,4 @@
-import csv
 import time
-import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,24 +12,31 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
+from crawler.collectors.collection_status import report_failure
+from crawler.collectors.common import write_csv_records
 from crawler.support_legacy.data_paths import collected_csv_path
 
 # 미국 뉴욕 시간대 고정 (서머타임 자동 계산)
 NY_TZ = ZoneInfo('America/New_York')
 # 기본 타겟 날짜: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-TICKERS = ["QQQ", "XLF", "XLE"]
+TICKERS = ["QQQ", "XLF", "XLE", "XLV"]
 API_KEY = "e7d6fe9de4msh8ae2ecfc141b9b5p1c3136jsna6f5a8efe5b5"
 
 def _save_results(records, target_date):
-    csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
+    csv_path = Path(
+        collected_csv_path(f"yahoo_market_news_{target_date}.csv")
+    )
 
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["sector", "title", "release_date", "url", "image", "body"])
-        writer.writeheader()
-        writer.writerows(records)
+    file_exists = csv_path.exists()
+
+    write_csv_records(
+        csv_path, records,
+        ["sector", "title", "release_date", "url", "image", "body"], mode="a", write_header=not file_exists,
+    )
 
     return csv_path
+
 
 def convert_to_et_date(utc_time_str: str) -> str:
     """
@@ -44,7 +49,7 @@ def convert_to_et_date(utc_time_str: str) -> str:
         utc_time_str = utc_time_str.replace('Z', '+00:00')
 
         dt_utc = datetime.fromisoformat(utc_time_str)
-        dt_et = dt_utc.astimezone(ZoneInfo("America/New_York"))
+        dt_et = dt_utc.astimezone(NY_TZ)
         
         return dt_et.strftime("%Y-%m-%d")
 
@@ -82,14 +87,21 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
         "snippetCount": 30
     }
     
-    response = requests.post(api_url, headers=yahoo_headers, json=payload)
+    response = requests.post(api_url, headers=yahoo_headers, json=payload, timeout=30)
 
     if response.status_code != 200:
+        report_failure(code="UPSTREAM_REQUEST_FAILED")
         print(f"[!] API 요청 실패 (Status Code: {response.status_code})")
         return []
 
     response_json = response.json()
-    news_list = response_json.get('data', {}).get('main', {}).get('stream', [])
+    try:
+        news_list = response_json['data']['main']['stream']
+        if not isinstance(news_list, list):
+            raise ValueError("Invalid Yahoo stream")
+    except (KeyError, TypeError, ValueError):
+        report_failure(code="INVALID_RESPONSE")
+        return []
 
     if not news_list:
         print(f"[*] 더 이상 불러올 뉴스가 없습니다. ({ticker})")
@@ -120,9 +132,14 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
                 print(f"[!] target_date 이후 기사 발견 ({release_date} > {target_date}), {ticker} 패스.")
                 continue
 
+        if not release_date or release_date == "N/A":
+            report_failure(code="PARSE_ERROR")
+            continue
+
         # 본문 추출
         body_url = content.get('clickThroughUrl', {}).get('url') if content.get('clickThroughUrl') else None
         if not body_url:
+            report_failure(code="PARSE_ERROR")
             continue
 
         try:
@@ -132,6 +149,10 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
             soup = BeautifulSoup(res.text, "html.parser")
             body_tag = soup.find("div", class_="bodyItems-wrapper") or soup.find("div", class_="caas-body")
             body_text = body_tag.get_text(" ", strip=True) if body_tag else ""
+
+            if not body_text:
+                report_failure(code="PARSE_ERROR")
+                continue
 
             og_image = soup.find("meta", property="og:image")
             image = og_image.get("content") if og_image else ""
@@ -148,6 +169,7 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
             time.sleep(0.5)
 
         except Exception as e:
+            report_failure(e)
             print(f"[!] 본문 수집 실패 ({body_url}): {e}")
             continue
 
